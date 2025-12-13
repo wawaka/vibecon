@@ -170,6 +170,55 @@ def get_latest_claude_version():
         print("Warning: Failed to get latest version from npm, using 'latest'")
         return "latest"
 
+def get_host_timezone():
+    """Get the host system timezone"""
+    # First, try the TZ environment variable
+    tz = os.environ.get("TZ")
+    if tz:
+        return tz
+
+    # Try reading /etc/timezone (common on Debian/Ubuntu)
+    try:
+        with open("/etc/timezone", "r") as f:
+            tz = f.read().strip()
+            if tz:
+                return tz
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    # Try to get timezone from timedatectl (systemd-based systems)
+    try:
+        result = subprocess.run(
+            ["timedatectl", "show", "-p", "Timezone", "--value"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True
+        )
+        if result.returncode == 0:
+            tz = result.stdout.strip()
+            if tz:
+                return tz
+    except FileNotFoundError:
+        pass
+
+    # Fallback: try to determine from /etc/localtime symlink
+    try:
+        localtime_path = Path("/etc/localtime")
+        if localtime_path.is_symlink():
+            target = localtime_path.resolve()
+            # Extract timezone from path like /usr/share/zoneinfo/America/New_York
+            parts = target.parts
+            if "zoneinfo" in parts:
+                zoneinfo_idx = parts.index("zoneinfo")
+                if len(parts) > zoneinfo_idx + 1:
+                    tz = "/".join(parts[zoneinfo_idx + 1:])
+                    return tz
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    # If all else fails, return UTC as default
+    return "UTC"
+
 def get_git_user_info():
     """Get git user.name and user.email from host"""
     user_name = ""
@@ -234,6 +283,10 @@ def start_container(cwd, container_name, image_name):
     if git_user_name:
         print(f"Configuring git user: {git_user_name} <{git_user_email}>")
 
+    # Get host timezone
+    host_timezone = get_host_timezone()
+    print(f"Configuring timezone: {host_timezone}")
+
     print(f"Starting container '{container_name}' with {cwd} mounted at /workspace...")
 
     # Build docker run command
@@ -244,6 +297,7 @@ def start_container(cwd, container_name, image_name):
         "--hostname", container_hostname,
         "-e", f"TERM={host_term}",
         "-e", "COLORTERM=truecolor",
+        "-e", f"TZ={host_timezone}",
     ]
 
     # Add git user environment variables if available
@@ -382,6 +436,7 @@ Examples:
 
     # Execute command in container
     host_term = os.environ.get("TERM", "xterm-256color")
+    host_timezone = get_host_timezone()
 
     exec_result = subprocess.run(
         [
@@ -389,6 +444,7 @@ Examples:
             "-it",
             "-e", f"TERM={host_term}",
             "-e", "COLORTERM=truecolor",
+            "-e", f"TZ={host_timezone}",
             container_name
         ] + command
     )
