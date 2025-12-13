@@ -12,8 +12,18 @@ IMAGE_NAME = "vibecon:latest"
 # DEFAULT_COMMAND = ["zsh"]
 DEFAULT_COMMAND = ["claude", "--dangerously-skip-permissions"]
 
-def install_symlink():
+def install_symlink(simulate_path_missing=False):
     """Install symlink to ~/.local/bin/vibecon"""
+    # ANSI color codes
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    MAGENTA = "\033[95m"
+    CYAN = "\033[96m"
+
     script_path = Path(__file__).resolve()
     install_dir = Path.home() / ".local" / "bin"
     symlink_path = install_dir / "vibecon"
@@ -21,13 +31,62 @@ def install_symlink():
     # Create install directory if it doesn't exist
     install_dir.mkdir(parents=True, exist_ok=True)
 
-    # Remove existing symlink if it exists
-    if symlink_path.exists() or symlink_path.is_symlink():
-        symlink_path.unlink()
+    # Check if symlink already exists and points to the correct target
+    already_installed = False
+    if symlink_path.is_symlink() and symlink_path.resolve() == script_path:
+        already_installed = True
+        print(f"{GREEN}{BOLD}Already installed{RESET}")
+    else:
+        # Remove existing symlink if it exists but points elsewhere
+        if symlink_path.exists() or symlink_path.is_symlink():
+            symlink_path.unlink()
 
-    # Create symlink
-    symlink_path.symlink_to(script_path)
-    print(f"Installed: {symlink_path} -> {script_path}")
+        # Create symlink
+        symlink_path.symlink_to(script_path)
+        print(f"{GREEN}Installed:{RESET} {CYAN}{symlink_path}{RESET} -> {BLUE}{script_path}{RESET}")
+
+    # Check if install directory is in PATH
+    path_env = os.environ.get("PATH", "")
+    install_dir_str = str(install_dir)
+    if simulate_path_missing or install_dir_str not in path_env.split(os.pathsep):
+        # Detect user's shell
+        shell_path = os.environ.get("SHELL", "")
+        shell_name = os.path.basename(shell_path) if shell_path else "unknown"
+
+        # Determine config file and export syntax based on shell
+        if shell_name == "zsh":
+            config_file = "~/.zshrc"
+            export_cmd = f'export PATH="{install_dir}:$PATH"'
+        elif shell_name == "bash":
+            config_file = "~/.bashrc"
+            export_cmd = f'export PATH="{install_dir}:$PATH"'
+        elif shell_name == "fish":
+            config_file = "~/.config/fish/config.fish"
+            export_cmd = f'set -gx PATH "{install_dir}" $PATH'
+        elif shell_name in ["tcsh", "csh"]:
+            config_file = "~/.cshrc"
+            export_cmd = f'setenv PATH "{install_dir}:$PATH"'
+        else:
+            config_file = "~/.profile"
+            export_cmd = f'export PATH="{install_dir}:$PATH"'
+
+        # Print large banner warning with colors
+        print(f"\n{RED}{BOLD}{'=' * 70}")
+        print(f"  ⚠️  WARNING: PATH CUSTOMIZATION REQUIRED")
+        print(f"{'=' * 70}{RESET}")
+        print(f"\n  {YELLOW}{BOLD}{install_dir}{RESET} {RED}{BOLD}is NOT in your PATH!{RESET}\n")
+        print(f"  You must add it to your PATH to use {CYAN}{BOLD}'vibecon'{RESET} by name.")
+        print(f"\n{BLUE}{'─' * 70}{RESET}")
+        print(f"  {MAGENTA}Detected shell:{RESET} {BOLD}{shell_name}{RESET}")
+        print(f"{BLUE}{'─' * 70}{RESET}")
+        print(f"\n  {BOLD}Option 1:{RESET} Add to PATH for {YELLOW}CURRENT shell only{RESET} (temporary):")
+        print(f"    {GREEN}{export_cmd}{RESET}")
+        print(f"\n  {BOLD}Option 2:{RESET} Add to PATH {GREEN}PERMANENTLY{RESET} (recommended):")
+        print(f"    {GREEN}echo '{export_cmd}' >> {config_file}{RESET}")
+        print(f"    {GREEN}source {config_file}{RESET}")
+        print(f"\n{RED}{BOLD}{'=' * 70}{RESET}\n")
+    else:
+        print(f"\n{GREEN}{BOLD}✓{RESET} {GREEN}You can now use vibecon by its name:{RESET} {CYAN}{BOLD}vibecon{RESET}")
 
 def uninstall_symlink():
     """Uninstall symlink from ~/.local/bin/vibecon"""
@@ -248,6 +307,13 @@ Examples:
     )
 
     parser.add_argument(
+        "-I",
+        action="store_true",
+        dest="install_test",
+        help=argparse.SUPPRESS  # Hidden flag for testing PATH warning
+    )
+
+    parser.add_argument(
         "-u", "--uninstall",
         action="store_true",
         help="uninstall symlink from ~/.local/bin/vibecon"
@@ -276,6 +342,11 @@ Examples:
     # Handle install flag - install symlink and exit
     if args.install:
         install_symlink()
+        sys.exit(0)
+
+    # Handle install test flag - install symlink with PATH warning simulation and exit
+    if args.install_test:
+        install_symlink(simulate_path_missing=True)
         sys.exit(0)
 
     # Handle uninstall flag - uninstall symlink and exit
