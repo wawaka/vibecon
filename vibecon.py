@@ -273,6 +273,33 @@ def build_image(vibecon_root, image_name, claude_version=None):
         print("Failed to build image")
         sys.exit(1)
 
+def copy_claude_config(container_name):
+    """Copy local ~/.claude config files to the container"""
+    claude_dir = Path.home() / ".claude"
+    container_claude_dir = "/root/.claude"
+
+    files_to_copy = ["settings.json", "statusline.sh"]
+
+    for filename in files_to_copy:
+        local_file = claude_dir / filename
+        if local_file.exists():
+            print(f"Copying {filename} to container...")
+            # Ensure directory exists in container
+            subprocess.run(
+                ["docker", "exec", container_name, "mkdir", "-p", container_claude_dir],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            # Copy file
+            result = subprocess.run(
+                ["docker", "cp", str(local_file), f"{container_name}:{container_claude_dir}/{filename}"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            if result.returncode != 0:
+                print(f"Warning: Failed to copy {filename}: {result.stderr.decode()}")
+
+
 def start_container(cwd, container_name, image_name):
     """Start the container in detached mode"""
     host_term = os.environ.get("TERM", "xterm-256color")
@@ -338,6 +365,7 @@ def ensure_container_running(cwd, vibecon_root, container_name, image_name):
             print(f"Image '{image_name}' not found, building...")
             build_image(vibecon_root, image_name)
         start_container(cwd, container_name, image_name)
+        copy_claude_config(container_name)
 
 def main():
     parser = argparse.ArgumentParser(
