@@ -276,15 +276,14 @@ def build_image(vibecon_root, image_name, claude_version=None):
 def copy_claude_config(container_name):
     """Copy local ~/.claude config files to the container"""
     claude_dir = Path.home() / ".claude"
-    container_claude_dir = "/root/.claude"
+    container_claude_dir = "/home/node/.claude"
 
     files_to_copy = ["settings.json", "statusline.sh"]
 
     for filename in files_to_copy:
         local_file = claude_dir / filename
         if local_file.exists():
-            print(f"Copying {filename} to container...")
-            # Ensure directory exists in container
+            # Ensure directory exists in container with correct ownership
             subprocess.run(
                 ["docker", "exec", container_name, "mkdir", "-p", container_claude_dir],
                 stdout=subprocess.DEVNULL,
@@ -298,6 +297,13 @@ def copy_claude_config(container_name):
             )
             if result.returncode != 0:
                 print(f"Warning: Failed to copy {filename}: {result.stderr.decode()}")
+
+    # Fix ownership of the directory and files for node user (must run as root)
+    subprocess.run(
+        ["docker", "exec", "-u", "root", container_name, "chown", "-R", "node:node", container_claude_dir],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
 
 
 def start_container(cwd, container_name, image_name):
@@ -365,7 +371,6 @@ def ensure_container_running(cwd, vibecon_root, container_name, image_name):
             print(f"Image '{image_name}' not found, building...")
             build_image(vibecon_root, image_name)
         start_container(cwd, container_name, image_name)
-        copy_claude_config(container_name)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -461,6 +466,9 @@ Examples:
 
     # Ensure container is running
     ensure_container_running(cwd, vibecon_root, container_name, IMAGE_NAME)
+
+    # Copy claude config files before exec
+    copy_claude_config(container_name)
 
     # Execute command in container
     host_term = os.environ.get("TERM", "xterm-256color")
