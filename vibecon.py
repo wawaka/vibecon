@@ -30,6 +30,14 @@ def install_symlink(simulate_path_missing=False):
     install_dir = Path.home() / ".local" / "bin"
     symlink_path = install_dir / "vibecon"
 
+    # Create a display version with $HOME substitution
+    home_str = str(Path.home())
+    install_dir_str = str(install_dir)
+    if install_dir_str.startswith(home_str):
+        install_dir_display = "$HOME" + install_dir_str[len(home_str):]
+    else:
+        install_dir_display = install_dir_str
+
     # Create install directory if it doesn't exist
     install_dir.mkdir(parents=True, exist_ok=True)
 
@@ -37,7 +45,7 @@ def install_symlink(simulate_path_missing=False):
     already_installed = False
     if symlink_path.is_symlink() and symlink_path.resolve() == script_path:
         already_installed = True
-        print(f"{GREEN}{BOLD}Already installed{RESET}")
+        print(f"{GREEN}{BOLD}Already installed:{RESET} {CYAN}{symlink_path}{RESET} -> {BLUE}{script_path}{RESET}")
     else:
         # Remove existing symlink if it exists but points elsewhere
         if symlink_path.exists() or symlink_path.is_symlink():
@@ -49,7 +57,6 @@ def install_symlink(simulate_path_missing=False):
 
     # Check if install directory is in PATH
     path_env = os.environ.get("PATH", "")
-    install_dir_str = str(install_dir)
     if simulate_path_missing or install_dir_str not in path_env.split(os.pathsep):
         # Detect user's shell
         shell_path = os.environ.get("SHELL", "")
@@ -58,32 +65,30 @@ def install_symlink(simulate_path_missing=False):
         # Determine config file and export syntax based on shell
         if shell_name == "zsh":
             config_file = "~/.zshrc"
-            export_cmd = f'export PATH="{install_dir}:$PATH"'
+            export_cmd = f'export PATH="{install_dir_display}:$PATH"'
         elif shell_name == "bash":
             config_file = "~/.bashrc"
-            export_cmd = f'export PATH="{install_dir}:$PATH"'
+            export_cmd = f'export PATH="{install_dir_display}:$PATH"'
         elif shell_name == "fish":
             config_file = "~/.config/fish/config.fish"
-            export_cmd = f'set -gx PATH "{install_dir}" $PATH'
+            export_cmd = f'set -gx PATH "{install_dir_display}" $PATH'
         elif shell_name in ["tcsh", "csh"]:
             config_file = "~/.cshrc"
-            export_cmd = f'setenv PATH "{install_dir}:$PATH"'
+            export_cmd = f'setenv PATH "{install_dir_display}:$PATH"'
         else:
             config_file = "~/.profile"
-            export_cmd = f'export PATH="{install_dir}:$PATH"'
+            export_cmd = f'export PATH="{install_dir_display}:$PATH"'
 
         # Print large banner warning with colors
         print(f"\n{RED}{BOLD}{'=' * 70}")
         print(f"  ⚠️  WARNING: PATH CUSTOMIZATION REQUIRED")
         print(f"{'=' * 70}{RESET}")
-        print(f"\n  {YELLOW}{BOLD}{install_dir}{RESET} {RED}{BOLD}is NOT in your PATH!{RESET}\n")
+        print(f"\n  {YELLOW}{BOLD}{install_dir_display}{RESET} {RED}{BOLD}is NOT in your PATH!{RESET}\n")
         print(f"  You must add it to your PATH to use {CYAN}{BOLD}'vibecon'{RESET} by name.")
         print(f"\n{BLUE}{'─' * 70}{RESET}")
         print(f"  {MAGENTA}Detected shell:{RESET} {BOLD}{shell_name}{RESET}")
         print(f"{BLUE}{'─' * 70}{RESET}")
-        print(f"\n  {BOLD}Option 1:{RESET} Add to PATH for {YELLOW}CURRENT shell only{RESET} (temporary):")
-        print(f"    {GREEN}{export_cmd}{RESET}")
-        print(f"\n  {BOLD}Option 2:{RESET} Add to PATH {GREEN}PERMANENTLY{RESET} (recommended):")
+        print(f"\n  Add to PATH {GREEN}permanently{RESET}:")
         print(f"    {GREEN}echo '{export_cmd}' >> {config_file}{RESET}")
         print(f"    {GREEN}source {config_file}{RESET}")
         print(f"\n{RED}{BOLD}{'=' * 70}{RESET}\n")
