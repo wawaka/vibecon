@@ -5,6 +5,8 @@ import os
 import sys
 import hashlib
 import argparse
+import json
+import tempfile
 from pathlib import Path
 
 # Global configuration
@@ -338,32 +340,100 @@ def build_image(vibecon_root, image_name, versions=None):
 
     return composite_tag
 
-def copy_claude_config(container_name):
-    """Copy local ~/.claude config files to the container"""
+def sync_claude_config(container_name):
+    """Sync Claude config to container: statusLine section + referenced files + CLAUDE.md"""
     claude_dir = Path.home() / ".claude"
     container_claude_dir = "/home/node/.claude"
+    settings_file = claude_dir / "settings.json"
+    claude_md_file = claude_dir / "CLAUDE.md"
 
-    files_to_copy = ["settings.json", "statusline.sh"]
+    # Track files to copy and whether we need to do anything
+    files_to_copy = []
+    container_settings = {}
 
-    for filename in files_to_copy:
-        local_file = claude_dir / filename
-        if local_file.exists():
-            # Ensure directory exists in container with correct ownership
-            subprocess.run(
-                ["docker", "exec", container_name, "mkdir", "-p", container_claude_dir],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            # Copy file
-            result = subprocess.run(
-                ["docker", "cp", str(local_file), f"{container_name}:{container_claude_dir}/{filename}"],
+    # Parse settings.json if it exists
+    if settings_file.exists():
+        try:
+            with open(settings_file, "r") as f:
+                settings = json.load(f)
+
+            # Extract statusLine section if present
+            if "statusLine" in settings:
+                container_settings["statusLine"] = settings["statusLine"]
+
+                # If statusLine has a command, add that file to copy list
+                if "command" in settings["statusLine"]:
+                    cmd_path = settings["statusLine"]["command"]
+                    # Expand ~ to home directory
+                    if cmd_path.startswith("~"):
+                        cmd_path = str(Path.home()) + cmd_path[1:]
+                    cmd_file = Path(cmd_path)
+                    if cmd_file.exists():
+                        files_to_copy.append(cmd_file)
+
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Failed to parse settings.json: {e}")
+
+    # Ensure container directory exists
+    subprocess.run(
+        ["docker", "exec", container_name, "mkdir", "-p", container_claude_dir],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    # Handle CLAUDE.md sync: copy if exists locally, remove from container if not
+    if claude_md_file.exists():
+        files_to_copy.append(claude_md_file)
+    else:
+        # Remove CLAUDE.md from container if it doesn't exist locally
+        subprocess.run(
+            ["docker", "exec", container_name, "rm", "-f", f"{container_claude_dir}/CLAUDE.md"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    # Copy files using tar if we have any
+    if files_to_copy:
+        # Build tar with files, preserving just the filename (not full path)
+        # We need to handle files from different directories
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            for src_file in files_to_copy:
+                # Copy to temp dir with just the filename
+                dest = tmpdir_path / src_file.name
+                dest.write_bytes(src_file.read_bytes())
+                # Preserve executable bit
+                if os.access(src_file, os.X_OK):
+                    dest.chmod(dest.stat().st_mode | 0o111)
+
+            # Tar and copy all files at once
+            tar_create = subprocess.Popen(
+                ["tar", "-cf", "-", "."],
+                cwd=str(tmpdir_path),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
-            if result.returncode != 0:
-                print(f"Warning: Failed to copy {filename}: {result.stderr.decode()}")
+            tar_extract = subprocess.run(
+                ["docker", "exec", "-i", container_name, "tar", "-xf", "-", "-C", container_claude_dir],
+                stdin=tar_create.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            tar_create.wait()
+            if tar_extract.returncode != 0:
+                print(f"Warning: Failed to copy files: {tar_extract.stderr.decode()}")
 
-    # Fix ownership of the directory and files for node user (must run as root)
+    # Write container settings.json if we have any settings to write
+    if container_settings:
+        settings_json = json.dumps(container_settings, indent=2)
+        subprocess.run(
+            ["docker", "exec", container_name, "sh", "-c",
+             f"cat > {container_claude_dir}/settings.json << 'EOFCONFIG'\n{settings_json}\nEOFCONFIG"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE
+        )
+
+    # Fix ownership for node user
     subprocess.run(
         ["docker", "exec", "-u", "root", container_name, "chown", "-R", "node:node", container_claude_dir],
         stdout=subprocess.DEVNULL,
@@ -576,8 +646,8 @@ Examples:
     # Ensure container is running
     ensure_container_running(cwd, vibecon_root, container_name, IMAGE_NAME)
 
-    # Copy claude config files before exec
-    copy_claude_config(container_name)
+    # Sync claude config before exec
+    sync_claude_config(container_name)
 
     # Execute command in container
     host_term = os.environ.get("TERM", "xterm-256color")
