@@ -4,6 +4,8 @@ ARG TZ
 ENV TZ="$TZ"
 
 ARG CLAUDE_CODE_VERSION=latest
+ARG GEMINI_CLI_VERSION=latest
+ARG OPENAI_CODEX_VERSION=latest
 
 # Install basic development tools and iptables/ipset
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -86,8 +88,11 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
   -a "source /usr/share/doc/fzf/examples/completion.zsh" \
   -x
 
-# Install Claude
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+# Install AI coding assistants
+RUN npm install -g \
+  @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+  @google/gemini-cli@${GEMINI_CLI_VERSION} \
+  @openai/codex@${OPENAI_CODEX_VERSION}
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]

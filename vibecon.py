@@ -153,22 +153,48 @@ def image_exists(image_name):
     )
     return result.returncode == 0
 
-def get_latest_claude_version():
-    """Get the latest version of @anthropic-ai/claude-code from npm"""
-    print("Checking latest claude-code version from npm...")
+def get_npm_package_version(package_name, short_name):
+    """Get the latest version of an npm package"""
     result = subprocess.run(
-        ["npm", "view", "@anthropic-ai/claude-code", "version"],
+        ["npm", "view", package_name, "version"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True
     )
     if result.returncode == 0:
         version = result.stdout.strip()
-        print(f"Latest claude-code version: {version}")
         return version
     else:
-        print("Warning: Failed to get latest version from npm, using 'latest'")
-        return "latest"
+        print(f"Warning: Failed to get {short_name} version from npm")
+        return None
+
+
+def get_all_versions():
+    """Get versions of all 3 AI CLI tools from npm"""
+    print("Checking latest versions from npm...")
+
+    packages = [
+        ("@anthropic-ai/claude-code", "cc", "Claude Code"),
+        ("@google/gemini-cli", "g", "Gemini CLI"),
+        ("@openai/codex", "oac", "OpenAI Codex"),
+    ]
+
+    versions = {}
+    for package_name, short_name, display_name in packages:
+        version = get_npm_package_version(package_name, short_name)
+        if version:
+            versions[short_name] = version
+            print(f"  {display_name}: {version}")
+        else:
+            versions[short_name] = "latest"
+            print(f"  {display_name}: latest (failed to fetch)")
+
+    return versions
+
+
+def make_composite_tag(versions):
+    """Create composite tag from versions: cc{ver}_g{ver}_oac{ver}"""
+    return f"cc{versions['cc']}_g{versions['g']}_oac{versions['oac']}"
 
 def get_host_timezone():
     """Get the host system timezone"""
@@ -246,25 +272,25 @@ def get_git_user_info():
 
     return user_name, user_email
 
-def build_image(vibecon_root, image_name, claude_version=None):
-    """Build the Docker image"""
-    if claude_version is None:
-        claude_version = "latest"
+def build_image(vibecon_root, image_name, versions=None):
+    """Build the Docker image with all 3 AI CLI tools"""
+    if versions is None:
+        versions = {"cc": "latest", "g": "latest", "oac": "latest"}
 
-    print(f"Building image '{image_name}' with claude-code@{claude_version}...")
+    composite_tag = make_composite_tag(versions)
+    print(f"Building image with composite tag: {composite_tag}")
 
-    # Build command with version tag
+    # Build command with all version build args
     build_cmd = [
         "docker", "build",
-        "--build-arg", f"CLAUDE_CODE_VERSION={claude_version}",
-        "-t", image_name
+        "--build-arg", f"CLAUDE_CODE_VERSION={versions['cc']}",
+        "--build-arg", f"GEMINI_CLI_VERSION={versions['g']}",
+        "--build-arg", f"OPENAI_CODEX_VERSION={versions['oac']}",
+        "-t", image_name,
+        "-t", f"vibecon:{composite_tag}"
     ]
 
-    # Add version-specific tag if not "latest"
-    if claude_version != "latest":
-        version_tag = f"vibecon:{claude_version}"
-        build_cmd.extend(["-t", version_tag])
-        print(f"Tagging as: {image_name} and {version_tag}")
+    print(f"Tagging as: {image_name} and vibecon:{composite_tag}")
 
     build_cmd.append(".")
 
@@ -272,6 +298,8 @@ def build_image(vibecon_root, image_name, claude_version=None):
     if build_result.returncode != 0:
         print("Failed to build image")
         sys.exit(1)
+
+    return composite_tag
 
 def copy_claude_config(container_name):
     """Copy local ~/.claude config files to the container"""
@@ -380,9 +408,11 @@ def main():
 Examples:
   %(prog)s                    # Start "{' '.join(DEFAULT_COMMAND)}" in container
   %(prog)s zsh                # Run zsh in container
-  %(prog)s claude             # Run claude in container
-  %(prog)s ls -la             # Run 'ls -la' in container
-  %(prog)s -b                 # Rebuild image and start zsh
+  %(prog)s claude             # Run Claude Code in container
+  %(prog)s gemini             # Run Gemini CLI in container
+  %(prog)s codex              # Run OpenAI Codex in container
+  %(prog)s -b                 # Check versions and rebuild if updated
+  %(prog)s -b -f              # Force rebuild regardless of versions
   %(prog)s -k                 # Kill container for current workspace
 """
     )
@@ -415,7 +445,13 @@ Examples:
     parser.add_argument(
         "-b", "--build",
         action="store_true",
-        help="force rebuild the Docker image"
+        help="rebuild the Docker image (skips if versions unchanged)"
+    )
+
+    parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="force rebuild even if image exists (use with -b)"
     )
 
     parser.add_argument(
@@ -450,10 +486,25 @@ Examples:
 
     container_name = generate_container_name(cwd)
 
-    # Handle build flag - get latest version and build the image
+    # Handle build flag - check versions and build only if needed
     if args.build:
-        claude_version = get_latest_claude_version()
-        build_image(vibecon_root, IMAGE_NAME, claude_version)
+        versions = get_all_versions()
+        composite_tag = make_composite_tag(versions)
+        versioned_image = f"vibecon:{composite_tag}"
+
+        if image_exists(versioned_image) and not args.force:
+            print(f"\nImage already exists: {versioned_image}")
+            print("No rebuild needed - all versions are up to date.")
+            print("Use -f/--force to rebuild anyway.")
+        else:
+            if args.force and image_exists(versioned_image):
+                print(f"\nForce rebuild requested...")
+            else:
+                print(f"\nNew versions detected, building image...")
+            build_image(vibecon_root, IMAGE_NAME, versions)
+            print(f"\nBuild complete! Image tagged as:")
+            print(f"  - {IMAGE_NAME}")
+            print(f"  - {versioned_image}")
         sys.exit(0)
 
     # Handle kill flag - just kill the container and exit
