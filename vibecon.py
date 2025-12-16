@@ -108,15 +108,52 @@ def is_container_running(container_name):
     )
     return result.returncode == 0 and result.stdout.strip() == "true"
 
-def kill_container(container_name):
-    """Kill and remove the container"""
-    print(f"Killing container '{container_name}'...")
+def container_exists(container_name):
+    """Check if container exists (in any state: running, stopped, dead, etc.)"""
+    result = subprocess.run(
+        ["docker", "inspect", container_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    return result.returncode == 0
+
+def restart_container(container_name):
+    """Attempt to restart a stopped/dead container. Returns True if successful."""
+    print(f"Found stopped container '{container_name}', attempting to restart...")
+    result = subprocess.run(
+        ["docker", "start", container_name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    if result.returncode == 0:
+        print(f"Container '{container_name}' restarted successfully.")
+        return True
+    else:
+        print(f"Failed to restart container: {result.stderr.decode().strip()}")
+        return False
+
+def stop_container(container_name):
+    """Stop the container (can be restarted later)"""
+    print(f"Stopping container '{container_name}'...")
+    result = subprocess.run(
+        ["docker", "stop", container_name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    if result.returncode == 0:
+        print("Container stopped.")
+    else:
+        print("Container was not running.")
+
+def destroy_container(container_name):
+    """Destroy and remove the container permanently"""
+    print(f"Destroying container '{container_name}'...")
     subprocess.run(
         ["docker", "rm", "-f", container_name],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
-    print("Container killed.")
+    print("Container destroyed.")
 
 def find_vibecon_root():
     """Find the vibecon root directory (parent of vibecon.py where Dockerfile is)"""
@@ -387,18 +424,27 @@ def start_container(cwd, container_name, image_name):
 
 def ensure_container_running(cwd, vibecon_root, container_name, image_name):
     """Ensure container is running"""
-    if not is_container_running(container_name):
-        # Remove stopped container if it exists
+    if is_container_running(container_name):
+        return  # Already running, nothing to do
+
+    # Container is not running - check if it exists (stopped/dead)
+    if container_exists(container_name):
+        # Try to restart the stopped container
+        if restart_container(container_name):
+            return  # Successfully restarted
+        # Restart failed, remove and recreate
+        print("Restart failed, removing container and creating a new one...")
         subprocess.run(
             ["docker", "rm", "-f", container_name],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
-        # Build image only if it doesn't exist
-        if not image_exists(image_name):
-            print(f"Image '{image_name}' not found, building...")
-            build_image(vibecon_root, image_name)
-        start_container(cwd, container_name, image_name)
+
+    # Build image only if it doesn't exist
+    if not image_exists(image_name):
+        print(f"Image '{image_name}' not found, building...")
+        build_image(vibecon_root, image_name)
+    start_container(cwd, container_name, image_name)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -413,7 +459,8 @@ Examples:
   %(prog)s codex              # Run OpenAI Codex in container
   %(prog)s -b                 # Check versions and rebuild if updated
   %(prog)s -b -f              # Force rebuild regardless of versions
-  %(prog)s -k                 # Kill container for current workspace
+  %(prog)s -k                 # Stop container (can be restarted)
+  %(prog)s -K                 # Destroy container permanently
 """
     )
 
@@ -437,9 +484,15 @@ Examples:
     )
 
     parser.add_argument(
-        "-k", "--kill",
+        "-k", "--stop",
         action="store_true",
-        help="kill and remove the container for current workspace"
+        help="stop the container for current workspace (can be restarted)"
+    )
+
+    parser.add_argument(
+        "-K", "--destroy",
+        action="store_true",
+        help="destroy and remove the container permanently"
     )
 
     parser.add_argument(
@@ -507,9 +560,14 @@ Examples:
             print(f"  - {versioned_image}")
         sys.exit(0)
 
-    # Handle kill flag - just kill the container and exit
-    if args.kill:
-        kill_container(container_name)
+    # Handle stop flag - stop the container and exit
+    if args.stop:
+        stop_container(container_name)
+        sys.exit(0)
+
+    # Handle destroy flag - destroy the container and exit
+    if args.destroy:
+        destroy_container(container_name)
         sys.exit(0)
 
     # Get command to execute (use default if not specified)
