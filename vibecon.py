@@ -528,7 +528,7 @@ Examples:
   %(prog)s gemini             # Run Gemini CLI in container
   %(prog)s codex              # Run OpenAI Codex in container
   %(prog)s -b                 # Check versions and rebuild if updated
-  %(prog)s -b -f              # Force rebuild regardless of versions
+  %(prog)s -B                 # Force rebuild regardless of versions
   %(prog)s -k                 # Stop container (can be restarted)
   %(prog)s -K                 # Destroy container permanently
 """
@@ -572,9 +572,9 @@ Examples:
     )
 
     parser.add_argument(
-        "-f", "--force",
+        "-B", "--force-build",
         action="store_true",
-        help="force rebuild even if image exists (use with -b)"
+        help="force rebuild even if image exists"
     )
 
     parser.add_argument(
@@ -610,17 +610,17 @@ Examples:
     container_name = generate_container_name(cwd)
 
     # Handle build flag - check versions and build only if needed
-    if args.build:
+    if args.build or args.force_build:
         versions = get_all_versions()
         composite_tag = make_composite_tag(versions)
         versioned_image = f"vibecon:{composite_tag}"
 
-        if image_exists(versioned_image) and not args.force:
+        if image_exists(versioned_image) and not args.force_build:
             print(f"\nImage already exists: {versioned_image}")
             print("No rebuild needed - all versions are up to date.")
-            print("Use -f/--force to rebuild anyway.")
+            print("Use -B/--force-build to rebuild anyway.")
         else:
-            if args.force and image_exists(versioned_image):
+            if args.force_build and image_exists(versioned_image):
                 print(f"\nForce rebuild requested...")
             else:
                 print(f"\nNew versions detected, building image...")
