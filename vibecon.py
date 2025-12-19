@@ -175,16 +175,12 @@ def find_vibecon_root():
 
 def generate_container_name(workspace_path):
     """Generate container name based on workspace path"""
-    # Create a short hash from the workspace path
+    # Create full hash from the workspace path
     path_hash = hashlib.md5(workspace_path.encode()).hexdigest()[:8]
 
     # Sanitize the path for use in container name
     # Remove leading slash and replace special chars with hyphens
     sanitized_path = workspace_path.lstrip('/').replace('/', '-').replace('_', '-').lower()
-
-    # Limit length to avoid overly long names
-    if len(sanitized_path) > 40:
-        sanitized_path = sanitized_path[:40]
 
     return f"vibecon-{sanitized_path}-{path_hash}"
 
