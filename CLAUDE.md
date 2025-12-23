@@ -22,6 +22,46 @@ vibecon -k               # Stop container (can restart later)
 vibecon -K               # Destroy container permanently
 ```
 
+## Configuration Files
+
+Vibecon supports JSON config files for extra mounts and volumes:
+- `~/.vibecon.json` - Global config (applies to all projects)
+- `./.vibecon.json` - Project config (applies to current workspace)
+
+Configs are merged: global first, then project overrides.
+
+### Mount Types
+
+| Type | Syntax | Docker Volume Name |
+|------|--------|-------------------|
+| Bind mount | `./src:/dst` | N/A (host path) |
+| Anonymous volume | `/container/path` | Auto-generated |
+| Local volume | `"vol": {}` | `{container-name}_vol` |
+| Global volume | `"vol": {"global": true}` | `vol` |
+
+### Example Config
+
+```json
+{
+  "volumes": {
+    "node_modules": {},
+    "npm_cache": { "global": true }
+  },
+  "mounts": [
+    "/workspace/.temp",
+    "node_modules:/workspace/node_modules",
+    "npm_cache:/home/node/.npm",
+    "./data:/data:ro"
+  ]
+}
+```
+
+### Path Resolution
+- `./` and `../` - relative to project root
+- `~/` - user's home directory
+- `/` - absolute path
+- No prefix (e.g., `volname`) - named volume
+
 ## Architecture
 
 **Single-file CLI**: `vibecon.py` - All logic in one Python script (~670 lines)
@@ -35,6 +75,8 @@ vibecon -K               # Destroy container permanently
 - `sync_claude_config()` - Copies statusLine settings and CLAUDE.md from host `~/.claude/` to container
 - `get_all_versions()` - Fetches latest versions of claude-code, gemini-cli, codex from npm
 - `build_image()` - Builds Docker image with composite version tag
+- `get_merged_config()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
+- `parse_mount()` - Parses mount specs into docker -v arguments
 
 **Docker image** (`Dockerfile`):
 - Base: `node:24` with zsh, git, fzf, gh, delta

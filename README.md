@@ -49,6 +49,31 @@ vibecon -B               # Force rebuild
 - Runs as non-root `node` user
 - Git config inherited from host
 
+## Configuration
+
+Optional config files: `~/.vibecon.json` (global) and `./.vibecon.json` (project)
+
+```json
+{
+  "volumes": {
+    "node_modules": {},
+    "npm_cache": { "global": true }
+  },
+  "mounts": [
+    "node_modules:/workspace/node_modules",
+    "npm_cache:/home/node/.npm",
+    "./data:/data:ro",
+    "/workspace/.cache"
+  ]
+}
+```
+
+Mount types:
+- `./path:/dst` - Bind mount (relative to project)
+- `vol:/dst` - Named volume (local to project)
+- `vol:/dst` + `{"global": true}` - Shared volume (across projects)
+- `/container/path` - Anonymous volume (ephemeral)
+
 ## Install/Uninstall
 
 ```bash

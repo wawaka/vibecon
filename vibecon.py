@@ -11,6 +11,97 @@ from pathlib import Path
 
 # Global configuration
 IMAGE_NAME = "vibecon:latest"
+
+
+# ============================================================================
+# Config file support
+# ============================================================================
+
+def load_config(config_path):
+    """Load JSON config file, return empty dict if not found or invalid."""
+    path = os.path.expanduser(config_path)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in {path}: {e}")
+        sys.exit(1)
+
+
+def get_merged_config(project_root):
+    """Load and merge global + project configs."""
+    global_cfg = load_config("~/.vibecon.json")
+    project_cfg = load_config(os.path.join(project_root, ".vibecon.json"))
+
+    return {
+        "volumes": {**global_cfg.get("volumes", {}), **project_cfg.get("volumes", {})},
+        "mounts": global_cfg.get("mounts", []) + project_cfg.get("mounts", []),
+    }
+
+
+def is_named_volume(source):
+    """Check if source is a named volume (not a path)."""
+    return not (source.startswith('./') or
+                source.startswith('../') or
+                source.startswith('~/') or
+                source.startswith('/'))
+
+
+def parse_mount(mount_spec, project_root, container_name, declared_volumes):
+    """Parse mount spec into docker -v argument.
+
+    Supports:
+    - Anonymous volumes: "/container/path" (no colon)
+    - Bind mounts: "./src:/dst" or "/src:/dst" or "~/src:/dst"
+    - Named volumes: "volname:/dst" (local) or global if declared with {"global": true}
+    - Long syntax: {"source": "...", "target": "...", "read_only": bool}
+    """
+    if isinstance(mount_spec, str):
+        if ":" not in mount_spec:
+            # Anonymous volume: "/container/path"
+            return mount_spec
+        parts = mount_spec.split(":")
+        source = parts[0]
+        target = parts[1]
+        read_only = len(parts) > 2 and parts[2] == "ro"
+    else:
+        source = mount_spec.get("source")
+        target = mount_spec["target"]
+        read_only = mount_spec.get("read_only", False)
+        if source is None:
+            # Anonymous volume in long syntax
+            return target
+
+    if is_named_volume(source):
+        # Named volume - check if global or local
+        if source not in declared_volumes:
+            print(f"Warning: volume '{source}' used but not declared in 'volumes'")
+            # Default to local if undeclared
+            volume_name = f"{container_name}_{source}"
+        elif declared_volumes[source].get("global", False):
+            # Global volume - use name as-is
+            volume_name = source
+        else:
+            # Local volume - prefix with container name
+            volume_name = f"{container_name}_{source}"
+        mount_arg = f"{volume_name}:{target}"
+    else:
+        # Bind mount - resolve path
+        resolved = os.path.expanduser(source)
+        if not os.path.isabs(resolved):
+            resolved = os.path.normpath(os.path.join(project_root, resolved))
+        if not os.path.exists(resolved):
+            print(f"Warning: mount source does not exist: {resolved}")
+        mount_arg = f"{resolved}:{target}"
+
+    if read_only:
+        mount_arg += ":ro"
+
+    return mount_arg
+
+
 # DEFAULT_COMMAND = ["zsh"]
 DEFAULT_COMMAND = ["claude", "--dangerously-skip-permissions"]
 
@@ -442,8 +533,11 @@ def sync_claude_config(container_name):
     )
 
 
-def start_container(cwd, container_name, image_name):
+def start_container(cwd, container_name, image_name, config=None):
     """Start the container in detached mode"""
+    if config is None:
+        config = {"volumes": {}, "mounts": []}
+
     host_term = os.environ.get("TERM", "xterm-256color")
     container_hostname = "vibecon"
 
@@ -476,11 +570,17 @@ def start_container(cwd, container_name, image_name):
             "-e", f"GIT_USER_EMAIL={git_user_email}",
         ])
 
-    # Add volume mount and image
-    docker_cmd.extend([
-        "-v", f"{cwd}:/workspace",
-        image_name
-    ])
+    # Add main workspace volume mount
+    docker_cmd.extend(["-v", f"{cwd}:/workspace"])
+
+    # Add extra mounts from config
+    declared_volumes = config.get("volumes", {})
+    for mount_spec in config.get("mounts", []):
+        mount_arg = parse_mount(mount_spec, cwd, container_name, declared_volumes)
+        docker_cmd.extend(["-v", mount_arg])
+
+    # Add image name
+    docker_cmd.append(image_name)
 
     # Start container detached with sleep infinity to keep it running
     run_result = subprocess.run(
@@ -493,7 +593,7 @@ def start_container(cwd, container_name, image_name):
         print(f"Failed to start container: {run_result.stderr.decode()}")
         sys.exit(1)
 
-def ensure_container_running(cwd, vibecon_root, container_name, image_name):
+def ensure_container_running(cwd, vibecon_root, container_name, image_name, config=None):
     """Ensure container is running"""
     if is_container_running(container_name):
         return  # Already running, nothing to do
@@ -515,7 +615,7 @@ def ensure_container_running(cwd, vibecon_root, container_name, image_name):
     if not image_exists(image_name):
         print(f"Image '{image_name}' not found, building...")
         build_image(vibecon_root, image_name)
-    start_container(cwd, container_name, image_name)
+    start_container(cwd, container_name, image_name, config)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -610,6 +710,9 @@ Examples:
 
     container_name = generate_container_name(cwd)
 
+    # Load config files
+    config = get_merged_config(cwd)
+
     # Handle build flag - check versions and build only if needed
     if args.build or args.force_build:
         versions = get_all_versions()
@@ -645,7 +748,7 @@ Examples:
     command = args.command if args.command else DEFAULT_COMMAND
 
     # Ensure container is running
-    ensure_container_running(cwd, vibecon_root, container_name, IMAGE_NAME)
+    ensure_container_running(cwd, vibecon_root, container_name, IMAGE_NAME, config)
 
     # Sync claude config before exec
     sync_claude_config(container_name)
