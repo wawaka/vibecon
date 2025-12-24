@@ -7,6 +7,7 @@ import hashlib
 import argparse
 import json
 import tempfile
+import asyncio
 from pathlib import Path
 
 # Global configuration
@@ -284,24 +285,23 @@ def image_exists(image_name):
     )
     return result.returncode == 0
 
-def get_npm_package_version(package_name, short_name):
-    """Get the latest version of an npm package"""
-    result = subprocess.run(
-        ["npm", "view", package_name, "version"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
+async def get_npm_package_version_async(package_name, short_name):
+    """Get the latest version of an npm package asynchronously"""
+    proc = await asyncio.create_subprocess_exec(
+        "npm", "view", package_name, "version",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
     )
-    if result.returncode == 0:
-        version = result.stdout.strip()
-        return version
+    stdout, stderr = await proc.communicate()
+    if proc.returncode == 0:
+        return stdout.decode().strip()
     else:
         print(f"Warning: Failed to get {short_name} version from npm")
         return None
 
 
 def get_all_versions():
-    """Get versions of all 3 AI CLI tools from npm"""
+    """Get versions of all 3 AI CLI tools from npm concurrently"""
     print("Checking latest versions from npm...")
 
     packages = [
@@ -310,9 +310,14 @@ def get_all_versions():
         ("@openai/codex", "oac", "OpenAI Codex"),
     ]
 
+    async def fetch_all():
+        tasks = [get_npm_package_version_async(pkg, short) for pkg, short, _ in packages]
+        return await asyncio.gather(*tasks)
+
+    results = asyncio.run(fetch_all())
+
     versions = {}
-    for package_name, short_name, display_name in packages:
-        version = get_npm_package_version(package_name, short_name)
+    for (_, short_name, display_name), version in zip(packages, results):
         if version:
             versions[short_name] = version
             print(f"  {display_name}: {version}")
