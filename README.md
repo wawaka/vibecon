@@ -68,11 +68,70 @@ Optional config files: `~/.vibecon.json` (global) and `./.vibecon.json` (project
 }
 ```
 
-Mount types:
-- `./path:/dst` - Bind mount (relative to project)
-- `vol:/dst` - Named volume (local to project)
-- `vol:/dst` + `{"global": true}` - Shared volume (across projects)
-- `/container/path` - Anonymous volume (ephemeral)
+### Mount Types
+
+| Type | Syntax | Description |
+|------|--------|-------------|
+| Bind mount | `./src:/dst` | Host path (relative or absolute) |
+| Named volume | `vol:/dst` | Local to project container |
+| Global volume | `vol:/dst` + `{"global": true}` | Shared across projects |
+| Anonymous volume | `/container/path` | Ephemeral, not persisted |
+
+### Mount Options
+
+Options can be appended after the target path with a colon:
+
+```
+source:target:options
+```
+
+| Option | Description |
+|--------|-------------|
+| `ro` | Read-only mount |
+| `z` | SELinux shared label |
+| `Z` | SELinux private label |
+| `uid=N` | Set owner UID (volumes only) |
+| `gid=N` | Set owner GID (volumes only) |
+
+Examples:
+```json
+{
+  "volumes": {
+    "mydata": {},
+    "shared_cache": { "global": true }
+  },
+  "mounts": [
+    "./config:/app/config:ro",
+    "./logs:/app/logs:z",
+    "mydata:/data:uid=1000,gid=1000",
+    "shared_cache:/cache:ro,uid=1000,gid=1000"
+  ]
+}
+```
+
+### Long Syntax
+
+For more control, use object syntax:
+```json
+{
+  "mounts": [
+    {
+      "source": "myvolume",
+      "target": "/app/data",
+      "uid": 1000,
+      "gid": 1000
+    },
+    {
+      "source": "./local",
+      "target": "/app/local",
+      "read_only": true,
+      "selinux": "z"
+    }
+  ]
+}
+```
+
+**Note:** `uid`/`gid` options only work with named volumes (sets ownership when volume is created). Bind mounts inherit permissions from the host filesystem.
 
 ## Install/Uninstall
 

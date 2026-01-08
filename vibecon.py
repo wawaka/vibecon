@@ -37,70 +37,132 @@ def get_merged_config(project_root):
     project_cfg = load_config(os.path.join(project_root, ".vibecon.json"))
 
     return {
-        "volumes": {**global_cfg.get("volumes", {}), **project_cfg.get("volumes", {})},
         "mounts": global_cfg.get("mounts", []) + project_cfg.get("mounts", []),
     }
 
 
-def is_named_volume(source):
-    """Check if source is a named volume (not a path)."""
-    return not (source.startswith('./') or
-                source.startswith('../') or
-                source.startswith('~/') or
-                source.startswith('/'))
+def parse_mount(mount_spec, project_root, container_name):
+    """Parse mount spec into docker mount arguments.
 
+    Returns a list of docker arguments, e.g., ["-v", "..."] or ["--mount", "..."]
 
-def parse_mount(mount_spec, project_root, container_name, declared_volumes):
-    """Parse mount spec into docker -v argument.
+    All mounts must be objects with explicit type. Supported types:
 
-    Supports:
-    - Anonymous volumes: "/container/path" (no colon)
-    - Bind mounts: "./src:/dst" or "/src:/dst" or "~/src:/dst"
-    - Named volumes: "volname:/dst" (local) or global if declared with {"global": true}
-    - Long syntax: {"source": "...", "target": "...", "read_only": bool}
+    1. type="bind" - Bind mount from host to container
+       Required: type, source, target
+       Optional: read_only (bool), selinux ("z" or "Z")
+
+    2. type="volume" - Named Docker volume
+       Required: type, source (volume name), target
+       Optional: read_only (bool), uid (int), gid (int), selinux ("z" or "Z"), global (bool)
+
+    3. type="anonymous" - Anonymous Docker volume
+       Required: type, target
+       Optional: read_only (bool)
     """
     if isinstance(mount_spec, str):
-        if ":" not in mount_spec:
-            # Anonymous volume: "/container/path"
-            return mount_spec
-        parts = mount_spec.split(":")
-        source = parts[0]
-        target = parts[1]
-        read_only = len(parts) > 2 and parts[2] == "ro"
-    else:
-        source = mount_spec.get("source")
-        target = mount_spec["target"]
-        read_only = mount_spec.get("read_only", False)
-        if source is None:
-            # Anonymous volume in long syntax
-            return target
+        print(f"Error: Mount must be an object with explicit 'type' field, got string: {mount_spec}")
+        sys.exit(1)
 
-    if is_named_volume(source):
-        # Named volume - check if global or local
-        if source not in declared_volumes:
-            print(f"Warning: volume '{source}' used but not declared in 'volumes'")
-            # Default to local if undeclared
-            volume_name = f"{container_name}_{source}"
-        elif declared_volumes[source].get("global", False):
-            # Global volume - use name as-is
-            volume_name = source
-        else:
-            # Local volume - prefix with container name
-            volume_name = f"{container_name}_{source}"
-        mount_arg = f"{volume_name}:{target}"
-    else:
-        # Bind mount - resolve path
+    if not isinstance(mount_spec, dict):
+        print(f"Error: Mount must be an object, got: {type(mount_spec).__name__}")
+        sys.exit(1)
+
+    mount_type = mount_spec.get("type")
+    if not mount_type:
+        print(f"Error: Mount missing required 'type' field: {mount_spec}")
+        sys.exit(1)
+
+    target = mount_spec.get("target")
+    if not target:
+        print(f"Error: Mount missing required 'target' field: {mount_spec}")
+        sys.exit(1)
+
+    read_only = mount_spec.get("read_only", False)
+    selinux = mount_spec.get("selinux")  # "z" or "Z"
+
+    if mount_type == "anonymous":
+        # Anonymous volume - just needs target path
+        return ["-v", target]
+
+    elif mount_type == "bind":
+        # Bind mount - requires source path
+        source = mount_spec.get("source")
+        if not source:
+            print(f"Error: Bind mount missing required 'source' field: {mount_spec}")
+            sys.exit(1)
+
+        # Resolve source path
         resolved = os.path.expanduser(source)
         if not os.path.isabs(resolved):
             resolved = os.path.normpath(os.path.join(project_root, resolved))
         if not os.path.exists(resolved):
-            print(f"Warning: mount source does not exist: {resolved}")
+            print(f"Warning: bind mount source does not exist: {resolved}")
+
+        # uid/gid not supported for bind mounts
+        if mount_spec.get("uid") or mount_spec.get("gid"):
+            print(f"Warning: uid/gid options ignored for bind mount (not supported by Docker)")
+
         mount_arg = f"{resolved}:{target}"
+        suffix_opts = []
+        if read_only:
+            suffix_opts.append("ro")
+        if selinux:
+            suffix_opts.append(selinux)
+        if suffix_opts:
+            mount_arg += ":" + ",".join(suffix_opts)
+        return ["-v", mount_arg]
 
-    if read_only:
-        mount_arg += ":ro"
+    elif mount_type == "volume":
+        # Named volume - requires source (volume name)
+        source = mount_spec.get("source")
+        if not source:
+            print(f"Error: Volume mount missing required 'source' field: {mount_spec}")
+            sys.exit(1)
 
-    return mount_arg
+        # Determine volume name based on global flag
+        if mount_spec.get("global", False):
+            volume_name = source
+        else:
+            # Local volume - prefix with container name
+            volume_name = f"{container_name}_{source}"
+
+        uid = mount_spec.get("uid")
+        gid = mount_spec.get("gid")
+
+        # If uid/gid specified, use --mount syntax with volume-opt
+        if uid is not None or gid is not None:
+            mount_opts = []
+            if uid is not None:
+                mount_opts.append(f"uid={uid}")
+            if gid is not None:
+                mount_opts.append(f"gid={gid}")
+            driver_opts = f"o={','.join(mount_opts)}"
+
+            mount_parts = [
+                f"type=volume",
+                f"source={volume_name}",
+                f"target={target}",
+                f"volume-opt={driver_opts}",
+            ]
+            if read_only:
+                mount_parts.append("readonly")
+            return ["--mount", ",".join(mount_parts)]
+        else:
+            # Simple -v syntax
+            mount_arg = f"{volume_name}:{target}"
+            suffix_opts = []
+            if read_only:
+                suffix_opts.append("ro")
+            if selinux:
+                suffix_opts.append(selinux)
+            if suffix_opts:
+                mount_arg += ":" + ",".join(suffix_opts)
+            return ["-v", mount_arg]
+
+    else:
+        print(f"Error: Unknown mount type '{mount_type}'. Must be 'bind', 'volume', or 'anonymous'")
+        sys.exit(1)
 
 
 # DEFAULT_COMMAND = ["zsh"]
@@ -579,10 +641,9 @@ def start_container(cwd, container_name, image_name, config=None):
     docker_cmd.extend(["-v", f"{cwd}:/workspace"])
 
     # Add extra mounts from config
-    declared_volumes = config.get("volumes", {})
     for mount_spec in config.get("mounts", []):
-        mount_arg = parse_mount(mount_spec, cwd, container_name, declared_volumes)
-        docker_cmd.extend(["-v", mount_arg])
+        mount_args = parse_mount(mount_spec, cwd, container_name)
+        docker_cmd.extend(mount_args)
 
     # Add image name
     docker_cmd.append(image_name)

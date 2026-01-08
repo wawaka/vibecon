@@ -24,43 +24,65 @@ vibecon -K               # Destroy container permanently
 
 ## Configuration Files
 
-Vibecon supports JSON config files for extra mounts and volumes:
+Vibecon supports JSON config files for extra mounts:
 - `~/.vibecon.json` - Global config (applies to all projects)
 - `./.vibecon.json` - Project config (applies to current workspace)
 
 Configs are merged: global first, then project overrides.
 
-### Mount Types
+### Mount Syntax
 
-| Type | Syntax | Docker Volume Name |
-|------|--------|-------------------|
-| Bind mount | `./src:/dst` | N/A (host path) |
-| Anonymous volume | `/container/path` | Auto-generated |
-| Local volume | `"vol": {}` | `{container-name}_vol` |
-| Global volume | `"vol": {"global": true}` | `vol` |
+All mounts must be objects with an explicit `type` field. Three types are supported:
+
+#### type="bind" - Bind mount from host to container
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | Must be `"bind"` |
+| `source` | Yes | Host path (`./`, `../`, `~/`, or absolute) |
+| `target` | Yes | Container path |
+| `read_only` | No | Boolean, default false |
+| `selinux` | No | `"z"` (shared) or `"Z"` (private) |
+
+#### type="volume" - Named Docker volume
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | Must be `"volume"` |
+| `source` | Yes | Volume name |
+| `target` | Yes | Container path |
+| `global` | No | If true, volume name used as-is; if false (default), prefixed with container name |
+| `read_only` | No | Boolean, default false |
+| `uid` | No | Owner UID (integer) |
+| `gid` | No | Owner GID (integer) |
+| `selinux` | No | `"z"` (shared) or `"Z"` (private) |
+
+#### type="anonymous" - Anonymous Docker volume
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | Must be `"anonymous"` |
+| `target` | Yes | Container path |
+| `read_only` | No | Boolean, default false |
 
 ### Example Config
 
 ```json
 {
-  "volumes": {
-    "node_modules": {},
-    "npm_cache": { "global": true }
-  },
   "mounts": [
-    "/workspace/.temp",
-    "node_modules:/workspace/node_modules",
-    "npm_cache:/home/node/.npm",
-    "./data:/data:ro"
+    {"type": "anonymous", "target": "/workspace/.temp"},
+    {"type": "volume", "source": "node_modules", "target": "/workspace/node_modules"},
+    {"type": "volume", "source": "npm_cache", "target": "/home/node/.npm", "global": true},
+    {"type": "bind", "source": "./data", "target": "/data", "read_only": true},
+    {"type": "volume", "source": "mydata", "target": "/data", "uid": 1000, "gid": 1000}
   ]
 }
 ```
 
-### Path Resolution
+### Path Resolution (for bind mounts)
 - `./` and `../` - relative to project root
 - `~/` - user's home directory
 - `/` - absolute path
-- No prefix (e.g., `volname`) - named volume
 
 ## Architecture
 
@@ -76,7 +98,7 @@ Configs are merged: global first, then project overrides.
 - `get_all_versions()` - Fetches latest versions of claude-code, gemini-cli, codex from npm
 - `build_image()` - Builds Docker image with composite version tag
 - `get_merged_config()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
-- `parse_mount()` - Parses mount specs into docker -v arguments
+- `parse_mount()` - Parses mount objects into docker mount arguments (returns `-v` or `--mount` args)
 
 **Docker image** (`Dockerfile`):
 - Base: `node:24` with zsh, git, fzf, gh, delta
