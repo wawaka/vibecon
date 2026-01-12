@@ -88,6 +88,14 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
   -a "source /usr/share/doc/fzf/examples/completion.zsh" \
   -x
 
+# Install package managers and common Node.js tools
+RUN npm install -g \
+  pnpm \
+  yarn \
+  typescript \
+  ts-node \
+  npm-check-updates
+
 # Install AI coding assistants
 RUN npm install -g \
   @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
