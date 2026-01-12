@@ -58,7 +58,7 @@ def parse_mount(mount_spec, project_root, container_name):
 
     3. type="anonymous" - Anonymous Docker volume
        Required: type, target
-       Optional: read_only (bool)
+       Optional: read_only (bool), uid (int), gid (int)
     """
     if isinstance(mount_spec, str):
         print(f"Error: Mount must be an object with explicit 'type' field, got string: {mount_spec}")
@@ -83,7 +83,30 @@ def parse_mount(mount_spec, project_root, container_name):
 
     if mount_type == "anonymous":
         # Anonymous volume - just needs target path
-        return ["-v", target]
+        uid = mount_spec.get("uid")
+        gid = mount_spec.get("gid")
+
+        if uid is not None or gid is not None:
+            # Use --mount syntax with tmpfs-backed volume for uid/gid support
+            mount_opts = []
+            if uid is not None:
+                mount_opts.append(f"uid={uid}")
+            if gid is not None:
+                mount_opts.append(f"gid={gid}")
+            driver_opts = f"o={','.join(mount_opts)}"
+
+            mount_parts = [
+                "type=volume",
+                f"target={target}",
+                "volume-opt=type=tmpfs",
+                "volume-opt=device=tmpfs",
+                f'"volume-opt={driver_opts}"',
+            ]
+            if read_only:
+                mount_parts.append("readonly")
+            return ["--mount", ",".join(mount_parts)]
+        else:
+            return ["-v", target]
 
     elif mount_type == "bind":
         # Bind mount - requires source path
@@ -130,7 +153,7 @@ def parse_mount(mount_spec, project_root, container_name):
         uid = mount_spec.get("uid")
         gid = mount_spec.get("gid")
 
-        # If uid/gid specified, use --mount syntax with volume-opt
+        # If uid/gid specified, use --mount syntax with tmpfs-backed volume
         if uid is not None or gid is not None:
             mount_opts = []
             if uid is not None:
@@ -140,10 +163,12 @@ def parse_mount(mount_spec, project_root, container_name):
             driver_opts = f"o={','.join(mount_opts)}"
 
             mount_parts = [
-                f"type=volume",
+                "type=volume",
                 f"source={volume_name}",
                 f"target={target}",
-                f"volume-opt={driver_opts}",
+                "volume-opt=type=tmpfs",
+                "volume-opt=device=tmpfs",
+                f'"volume-opt={driver_opts}"',
             ]
             if read_only:
                 mount_parts.append("readonly")
