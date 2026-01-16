@@ -368,9 +368,17 @@ def image_exists(image_name):
     result = subprocess.run(
         ["docker", "image", "inspect", image_name],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+        stderr=subprocess.PIPE,
+        text=True
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        # Only return False if it's actually "not found", not other errors
+        if "no such image" in result.stderr.lower():
+            return False
+        # Some other error occurred - print it and exit
+        print(f"Error checking image: {result.stderr.strip()}")
+        sys.exit(1)
+    return True
 
 async def get_npm_package_version_async(package_name, short_name):
     """Get the latest version of an npm package asynchronously"""
