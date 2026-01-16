@@ -586,7 +586,13 @@ def sync_claude_config(container_name):
             commands_source = None
 
     if commands_source:
-        # Ensure container commands directory exists
+        # Remove existing commands directory to ensure clean sync (no stale files)
+        subprocess.run(
+            ["docker", "exec", container_name, "rm", "-rf", f"{container_claude_dir}/commands"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Create fresh commands directory
         subprocess.run(
             ["docker", "exec", container_name, "mkdir", "-p", f"{container_claude_dir}/commands"],
             stdout=subprocess.DEVNULL,
