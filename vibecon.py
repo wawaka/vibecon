@@ -525,7 +525,7 @@ def build_image(vibecon_root, image_name, versions=None):
     return composite_tag
 
 def sync_claude_config(container_name):
-    """Sync Claude config to container: statusLine section + referenced files + CLAUDE.md"""
+    """Sync Claude config to container: statusLine section + referenced files + CLAUDE.md + commands dir"""
     claude_dir = Path.home() / ".claude"
     container_claude_dir = "/home/node/.claude"
     settings_file = claude_dir / "settings.json"
@@ -572,6 +572,46 @@ def sync_claude_config(container_name):
         # Remove CLAUDE.md from container if it doesn't exist locally
         subprocess.run(
             ["docker", "exec", container_name, "rm", "-f", f"{container_claude_dir}/CLAUDE.md"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    # Handle commands directory sync (may be a symlink)
+    commands_dir = claude_dir / "commands"
+    commands_source = None
+    if commands_dir.exists():
+        # Resolve symlink if it is one
+        commands_source = commands_dir.resolve()
+        if not commands_source.is_dir():
+            commands_source = None
+
+    if commands_source:
+        # Ensure container commands directory exists
+        subprocess.run(
+            ["docker", "exec", container_name, "mkdir", "-p", f"{container_claude_dir}/commands"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Copy commands directory using tar
+        tar_create = subprocess.Popen(
+            ["tar", "-cf", "-", "."],
+            cwd=str(commands_source),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        tar_extract = subprocess.run(
+            ["docker", "exec", "-i", container_name, "tar", "-xf", "-", "-C", f"{container_claude_dir}/commands"],
+            stdin=tar_create.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        tar_create.wait()
+        if tar_extract.returncode != 0:
+            print(f"Warning: Failed to copy commands directory: {tar_extract.stderr.decode()}")
+    else:
+        # Remove commands directory from container if it doesn't exist locally
+        subprocess.run(
+            ["docker", "exec", container_name, "rm", "-rf", f"{container_claude_dir}/commands"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )

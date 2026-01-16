@@ -154,7 +154,7 @@ vibecon       # Creates new container with updated mounts
 **Key functions**:
 - `get_merged_config()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
 - `parse_mount()` - Parses mount objects into docker arguments (returns `-v` or `--mount` args)
-- `sync_claude_config()` - Copies statusLine settings and CLAUDE.md from host `~/.claude/` to container
+- `sync_claude_config()` - Copies statusLine settings, CLAUDE.md, and commands/ dir from host `~/.claude/` to container
 - `get_all_versions()` - Fetches latest versions of claude-code, gemini-cli, codex from npm
 - `build_image()` - Builds Docker image with composite version tag
 
