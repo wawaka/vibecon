@@ -155,11 +155,12 @@ vibecon       # Creates new container with updated mounts
 - `get_merged_config()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
 - `parse_mount()` - Parses mount objects into docker arguments (returns `-v` or `--mount` args)
 - `sync_claude_config()` - Copies statusLine settings, CLAUDE.md, and commands/ dir from host `~/.claude/` to container
-- `get_all_versions()` - Fetches latest versions of claude-code, gemini-cli, codex from npm
+- `get_all_versions()` - Fetches latest versions of claude-code, gemini-cli, codex from npm, and Go from golang.org
 - `build_image()` - Builds Docker image with composite version tag
 
 **Docker image** (`Dockerfile`):
-- Base: `node:24` with zsh, git, fzf, gh, delta, nano, vim
+- Base: `node:24` with zsh, git, fzf, gh, delta, nano, vim, curl, make, build-essential
+- Go toolchain with gopls, delve, golangci-lint, goimports
 - Installs 3 AI CLI tools: `@anthropic-ai/claude-code`, `@google/gemini-cli`, `@openai/codex`
 - Runs as non-root `node` user (uid 1000)
 - Entrypoint configures git from env vars on first run

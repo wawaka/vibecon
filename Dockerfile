@@ -27,7 +27,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   jq \
   nano \
   vim \
+  curl \
+  wget \
+  make \
+  build-essential \
+  ca-certificates \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Go
+ARG GO_VERSION=1.24.2
+RUN ARCH=$(dpkg --print-architecture) && \
+  case "$ARCH" in \
+    amd64) GOARCH=amd64 ;; \
+    arm64) GOARCH=arm64 ;; \
+    *) echo "Unsupported architecture: $ARCH" && exit 1 ;; \
+  esac && \
+  wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GOARCH}.tar.gz" && \
+  tar -C /usr/local -xzf "go${GO_VERSION}.linux-${GOARCH}.tar.gz" && \
+  rm "go${GO_VERSION}.linux-${GOARCH}.tar.gz"
+
+ENV PATH=$PATH:/usr/local/go/bin
 
 # Ensure default node user has access to /usr/local/share
 RUN mkdir -p /usr/local/share/npm-global && \
@@ -63,6 +82,16 @@ exec "$@"' > /usr/local/bin/entrypoint.sh && \
 
 # Set up non-root user
 USER node
+
+# Set up Go environment for node user
+ENV GOPATH=/home/node/go
+ENV PATH=$PATH:/home/node/go/bin
+
+# Install essential Go tools
+RUN go install golang.org/x/tools/gopls@latest && \
+  go install github.com/go-delve/delve/cmd/dlv@latest && \
+  go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && \
+  go install golang.org/x/tools/cmd/goimports@latest
 
 # Install global packages
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global

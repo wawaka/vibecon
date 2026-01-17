@@ -395,9 +395,31 @@ async def get_npm_package_version_async(package_name, short_name):
         return None
 
 
+async def get_go_version_async():
+    """Get the latest stable Go version from golang.org"""
+    proc = await asyncio.create_subprocess_exec(
+        "curl", "-s", "https://go.dev/dl/?mode=json",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode == 0:
+        try:
+            releases = json.loads(stdout.decode())
+            # First stable release in the list
+            for release in releases:
+                if release.get("stable", False):
+                    # Version is like "go1.24.2", strip the "go" prefix
+                    return release["version"].lstrip("go")
+        except (json.JSONDecodeError, KeyError, IndexError):
+            pass
+    print("Warning: Failed to get Go version from golang.org")
+    return None
+
+
 def get_all_versions():
-    """Get versions of all 3 AI CLI tools from npm concurrently"""
-    print("Checking latest versions from npm...")
+    """Get versions of all AI CLI tools from npm and Go from golang.org concurrently"""
+    print("Checking latest versions...")
 
     packages = [
         ("@anthropic-ai/claude-code", "cc", "Claude Code"),
@@ -406,13 +428,19 @@ def get_all_versions():
     ]
 
     async def fetch_all():
-        tasks = [get_npm_package_version_async(pkg, short) for pkg, short, _ in packages]
-        return await asyncio.gather(*tasks)
+        npm_tasks = [get_npm_package_version_async(pkg, short) for pkg, short, _ in packages]
+        go_task = get_go_version_async()
+        all_tasks = npm_tasks + [go_task]
+        return await asyncio.gather(*all_tasks)
 
     results = asyncio.run(fetch_all())
 
+    # npm package results
+    npm_results = results[:-1]
+    go_result = results[-1]
+
     versions = {}
-    for (_, short_name, display_name), version in zip(packages, results):
+    for (_, short_name, display_name), version in zip(packages, npm_results):
         if version:
             versions[short_name] = version
             print(f"  {display_name}: {version}")
@@ -420,12 +448,20 @@ def get_all_versions():
             versions[short_name] = "latest"
             print(f"  {display_name}: latest (failed to fetch)")
 
+    # Go version
+    if go_result:
+        versions["go"] = go_result
+        print(f"  Go: {go_result}")
+    else:
+        versions["go"] = "1.24.2"  # fallback
+        print(f"  Go: 1.24.2 (failed to fetch, using fallback)")
+
     return versions
 
 
 def make_composite_tag(versions):
-    """Create composite tag from versions: cc{ver}_g{ver}_oac{ver}"""
-    return f"cc{versions['cc']}_g{versions['g']}_oac{versions['oac']}"
+    """Create composite tag from versions: cc{ver}_g{ver}_oac{ver}_go{ver}"""
+    return f"cc{versions['cc']}_g{versions['g']}_oac{versions['oac']}_go{versions['go']}"
 
 def get_host_timezone():
     """Get the host system timezone"""
@@ -504,9 +540,9 @@ def get_git_user_info():
     return user_name, user_email
 
 def build_image(vibecon_root, image_name, versions=None):
-    """Build the Docker image with all 3 AI CLI tools"""
+    """Build the Docker image with all AI CLI tools and Go"""
     if versions is None:
-        versions = {"cc": "latest", "g": "latest", "oac": "latest"}
+        versions = {"cc": "latest", "g": "latest", "oac": "latest", "go": "1.24.2"}
 
     composite_tag = make_composite_tag(versions)
     print(f"Building image with composite tag: {composite_tag}")
@@ -517,6 +553,7 @@ def build_image(vibecon_root, image_name, versions=None):
         "--build-arg", f"CLAUDE_CODE_VERSION={versions['cc']}",
         "--build-arg", f"GEMINI_CLI_VERSION={versions['g']}",
         "--build-arg", f"OPENAI_CODEX_VERSION={versions['oac']}",
+        "--build-arg", f"GO_VERSION={versions['go']}",
         "-t", image_name,
         "-t", f"vibecon:{composite_tag}"
     ]
