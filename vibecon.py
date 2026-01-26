@@ -422,7 +422,6 @@ def get_all_versions():
     print("Checking latest versions...")
 
     packages = [
-        ("@anthropic-ai/claude-code", "cc", "Claude Code"),
         ("@google/gemini-cli", "g", "Gemini CLI"),
         ("@openai/codex", "oac", "OpenAI Codex"),
     ]
@@ -460,8 +459,8 @@ def get_all_versions():
 
 
 def make_composite_tag(versions):
-    """Create composite tag from versions: cc{ver}_g{ver}_oac{ver}_go{ver}"""
-    return f"cc{versions['cc']}_g{versions['g']}_oac{versions['oac']}_go{versions['go']}"
+    """Create composite tag from versions: g{ver}_oac{ver}_go{ver}"""
+    return f"g{versions['g']}_oac{versions['oac']}_go{versions['go']}"
 
 def get_host_timezone():
     """Get the host system timezone"""
@@ -542,7 +541,7 @@ def get_git_user_info():
 def build_image(vibecon_root, image_name, versions=None):
     """Build the Docker image with all AI CLI tools and Go"""
     if versions is None:
-        versions = {"cc": "latest", "g": "latest", "oac": "latest", "go": "1.24.2"}
+        versions = {"g": "latest", "oac": "latest", "go": "1.24.2"}
 
     composite_tag = make_composite_tag(versions)
     print(f"Building image with composite tag: {composite_tag}")
@@ -550,7 +549,6 @@ def build_image(vibecon_root, image_name, versions=None):
     # Build command with all version build args
     build_cmd = [
         "docker", "build",
-        "--build-arg", f"CLAUDE_CODE_VERSION={versions['cc']}",
         "--build-arg", f"GEMINI_CLI_VERSION={versions['g']}",
         "--build-arg", f"OPENAI_CODEX_VERSION={versions['oac']}",
         "--build-arg", f"GO_VERSION={versions['go']}",

@@ -3,7 +3,6 @@ FROM node:24
 ARG TZ
 ENV TZ="$TZ"
 
-ARG CLAUDE_CODE_VERSION=latest
 ARG GEMINI_CLI_VERSION=latest
 ARG OPENAI_CODEX_VERSION=latest
 
@@ -95,7 +94,7 @@ RUN go install golang.org/x/tools/gopls@latest && \
 
 # Install global packages
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=$PATH:/usr/local/share/npm-global/bin
+ENV PATH=/home/node/.local/bin:$PATH:/usr/local/share/npm-global/bin
 
 # Set the default shell to zsh rather than sh
 ENV SHELL=/bin/zsh
@@ -127,9 +126,11 @@ RUN npm install -g \
 
 # Install AI coding assistants
 RUN npm install -g \
-  @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
   @google/gemini-cli@${GEMINI_CLI_VERSION} \
   @openai/codex@${OPENAI_CODEX_VERSION}
+
+# Install Claude Code via official installer
+RUN curl -fsSL https://claude.ai/install.sh | bash
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]
