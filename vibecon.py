@@ -529,7 +529,7 @@ def detect_worktree(workspace_path):
     # If .git is a file, parse it to find the main repo's .git directory
     if os.path.isfile(git_path):
         try:
-            with open(git_path) as f:
+            with open(git_path, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
             if content.startswith("gitdir:"):
                 # Parse: gitdir: /path/to/main/.git/worktrees/name
@@ -541,10 +541,15 @@ def detect_worktree(workspace_path):
                 # We want: main-repo/.git
                 if "/worktrees/" in gitdir:
                     main_git = gitdir.rsplit("/worktrees/", 1)[0]
+                    # Validate that the extracted main git path exists and is a directory
                     if os.path.isdir(main_git):
                         return main_git
-        except (IOError, OSError):
-            pass
+                    else:
+                        print(f"Warning: Git worktree detected but main .git directory not found: {main_git}")
+                else:
+                    print(f"Warning: Git worktree file format unexpected, expected '/worktrees/' in path: {gitdir}")
+        except (IOError, OSError) as e:
+            print(f"Warning: Failed to read git worktree file {git_path}: {e}")
 
     return None
 
