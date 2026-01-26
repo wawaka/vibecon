@@ -511,6 +511,44 @@ def get_host_timezone():
     # If all else fails, return UTC as default
     return "UTC"
 
+def detect_worktree(workspace_path):
+    """Detect if workspace is a git worktree, return main .git path if so.
+
+    In a worktree, .git is a file containing 'gitdir: /path/to/main/.git/worktrees/name'.
+    We need to mount the main .git directory so git operations work inside the container.
+
+    Returns:
+        str: Path to main .git directory if this is a worktree, None otherwise.
+    """
+    git_path = os.path.join(workspace_path, ".git")
+
+    # If .git is a directory, this is a normal repo (not a worktree)
+    if os.path.isdir(git_path):
+        return None
+
+    # If .git is a file, parse it to find the main repo's .git directory
+    if os.path.isfile(git_path):
+        try:
+            with open(git_path) as f:
+                content = f.read().strip()
+            if content.startswith("gitdir:"):
+                # Parse: gitdir: /path/to/main/.git/worktrees/name
+                gitdir = content.split(":", 1)[1].strip()
+                # Resolve to absolute path (handles relative paths)
+                gitdir = os.path.abspath(os.path.join(workspace_path, gitdir))
+                # Go up from .git/worktrees/name to .git
+                # gitdir points to: main-repo/.git/worktrees/worktree-name
+                # We want: main-repo/.git
+                if "/worktrees/" in gitdir:
+                    main_git = gitdir.rsplit("/worktrees/", 1)[0]
+                    if os.path.isdir(main_git):
+                        return main_git
+        except (IOError, OSError):
+            pass
+
+    return None
+
+
 def get_git_user_info():
     """Get git user.name and user.email from host"""
     user_name = ""
@@ -753,6 +791,14 @@ def start_container(cwd, container_name, image_name, config=None):
 
     # Add main workspace volume mount
     docker_cmd.extend(["-v", f"{cwd}:/workspace"])
+
+    # Auto-detect git worktree and mount main .git directory
+    # This allows git operations to work inside the container
+    main_git = detect_worktree(cwd)
+    if main_git:
+        print(f"Detected git worktree, mounting main .git: {main_git}")
+        # Mount at same absolute path so .git file references resolve correctly
+        docker_cmd.extend(["-v", f"{main_git}:{main_git}"])
 
     # Add extra mounts from config
     for mount_spec in config.get("mounts", []):
