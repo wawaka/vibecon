@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple, Callable
 
 from .config import ConfigManager
 from .mount_parser import MountParser
@@ -166,9 +166,9 @@ class DockerManager:
         )
         return exec_result.returncode
 
-    def ensure_container_running(self, cwd: str, vibecon_root: str, container_name: str, 
-                                config: Optional[Dict[str, Any]] = None, 
-                                build_image_func=None) -> None:
+    def ensure_container_running(self, cwd: str, vibecon_root: str, container_name: str,
+                                config: Optional[Dict[str, Any]] = None,
+                                build_image_func: Optional[Callable[[str, str, Dict[str, str]], str]] = None) -> None:
         """Ensure container is running."""
         if self.is_container_running(container_name):
             return  # Already running, nothing to do
@@ -242,7 +242,7 @@ class DockerManager:
         # If all else fails, return UTC as default
         return "UTC"
 
-    def _get_git_user_info(self) -> tuple[str, str]:
+    def _get_git_user_info(self) -> Tuple[str, str]:
         """Get git user.name and user.email from host."""
         user_name = ""
         user_email = ""

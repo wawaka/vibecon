@@ -6,13 +6,13 @@ import subprocess
 import sys
 from typing import Dict, List, Any, Optional
 
+# Fallback version for Go when fetch fails (updated: 2026-01-26)
+DEFAULT_GO_VERSION = "1.24.2"
+
 
 class VersionManager:
     """Manages version checking and Docker image building for Vibecon."""
-    
-    def __init__(self):
-        pass
-    
+
     async def get_npm_package_version_async(self, package_name: str, short_name: str) -> Optional[str]:
         """Get the latest version of an npm package asynchronously."""
         proc = await asyncio.create_subprocess_exec(
@@ -83,8 +83,8 @@ class VersionManager:
             versions["go"] = go_result
             print(f"  Go: {go_result}")
         else:
-            versions["go"] = "1.24.2"  # fallback
-            print(f"  Go: 1.24.2 (failed to fetch, using fallback)")
+            versions["go"] = DEFAULT_GO_VERSION
+            print(f"  Go: {DEFAULT_GO_VERSION} (failed to fetch, using fallback)")
 
         return versions
 
@@ -95,7 +95,7 @@ class VersionManager:
     def build_image(self, vibecon_root: str, image_name: str, versions: Optional[Dict[str, str]] = None) -> str:
         """Build the Docker image with all AI CLI tools and Go."""
         if versions is None:
-            versions = {"g": "latest", "oac": "latest", "go": "1.24.2"}
+            versions = {"g": "latest", "oac": "latest", "go": DEFAULT_GO_VERSION}
 
         composite_tag = self.make_composite_tag(versions)
         print(f"Building image with composite tag: {composite_tag}")

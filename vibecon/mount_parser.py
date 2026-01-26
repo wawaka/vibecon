@@ -62,6 +62,10 @@ class MountParser:
     @staticmethod
     def _parse_anonymous_mount(mount_spec: Dict[str, Any], target: str, read_only: bool) -> List[str]:
         """Parse anonymous volume mount."""
+        # Warn if selinux option is present (not supported for anonymous volumes)
+        if mount_spec.get("selinux"):
+            print(f"Warning: selinux option is not supported for anonymous volumes and will be ignored")
+
         uid = mount_spec.get("uid")
         gid = mount_spec.get("gid")
 
