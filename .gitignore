@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+vibecon
 
 # IDE
 .idea/
@@ -23,3 +24,6 @@ npm-debug.log*
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Bun
+bun.lockb

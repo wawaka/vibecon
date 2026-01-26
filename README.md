@@ -8,11 +8,11 @@ Persistent Docker containers for Claude Code, Gemini CLI, and OpenAI Codex.
 # Clone and build
 git clone <repo-url>
 cd vibecon
-npm install
-npm run build
+bun install
+bun run build
 
 # Install
-node dist/index.js -i
+./vibecon -i
 export PATH="$HOME/.local/bin:$PATH"  # add to shell rc
 
 # Run Claude Code in any project
@@ -274,22 +274,25 @@ vibecon       # Creates new container with updated mounts
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
-# Build TypeScript
-npm run build
+# Run directly with Bun (development)
+bun run src/index.ts [args]
 
-# Run in development mode
-npm run dev -- [args]
+# Run with watch mode
+bun run dev
 
-# Run compiled version
-node dist/index.js [args]
+# Build compiled binary
+bun run build
+
+# Run compiled binary
+./vibecon [args]
 ```
 
 ## Install/Uninstall
 
 ```bash
-npm run build
-node dist/index.js -i    # Install symlink to ~/.local/bin
+bun run build
+./vibecon -i             # Install symlink to ~/.local/bin
 vibecon -u               # Remove symlink
 ```

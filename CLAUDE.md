@@ -4,28 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Vibecon is a TypeScript CLI tool that creates persistent, isolated Docker containers for running Claude Code (and other AI coding assistants) safely. Each workspace directory gets its own container that persists across sessions.
+Vibecon is a TypeScript CLI tool built with Bun that creates persistent, isolated Docker containers for running Claude Code (and other AI coding assistants) safely. Each workspace directory gets its own container that persists across sessions.
 
 ## Commands
 
 ```bash
-# Build the TypeScript project
-npm install
-npm run build
+# Install dependencies and build
+bun install
+bun run build              # Creates compiled binary ./vibecon
+
+# Development
+bun run src/index.ts       # Run directly with Bun
+bun run dev                # Run with watch mode
 
 # Install/uninstall the vibecon symlink
-npm run build && node dist/index.js -i   # Install to ~/.local/bin/vibecon
-vibecon -u                                # Uninstall
+./vibecon -i               # Install to ~/.local/bin/vibecon
+vibecon -u                 # Uninstall
 
 # Container operations
-vibecon                  # Start claude in container (default command)
-vibecon zsh              # Run zsh in container
-vibecon gemini           # Run Gemini CLI
-vibecon codex            # Run OpenAI Codex
-vibecon -b               # Rebuild image if npm versions changed
-vibecon -B               # Force rebuild regardless of versions
-vibecon -k               # Stop container (can restart later)
-vibecon -K               # Destroy container permanently
+vibecon                    # Start claude in container (default command)
+vibecon zsh                # Run zsh in container
+vibecon gemini             # Run Gemini CLI
+vibecon codex              # Run OpenAI Codex
+vibecon -b                 # Rebuild image if npm versions changed
+vibecon -B                 # Force rebuild regardless of versions
+vibecon -k                 # Stop container (can restart later)
+vibecon -K                 # Destroy container permanently
 ```
 
 ## Configuration Files
@@ -148,32 +152,40 @@ vibecon       # Creates new container with updated mounts
 
 ## Architecture
 
-**TypeScript CLI**: `src/index.ts` - Main entry point compiled to `dist/index.js`
+**Modular TypeScript CLI** built with Bun for fast execution and easy compilation.
 
 **Project Structure**:
 ```
 vibecon/
 ├── src/
-│   └── index.ts        # Main CLI implementation
-├── dist/               # Compiled JavaScript (generated)
-├── package.json        # Node.js project config
+│   ├── index.ts        # Main entry point and CLI
+│   ├── types.ts        # TypeScript type definitions
+│   ├── config.ts       # Config loading and mount parsing
+│   ├── docker.ts       # Docker container operations
+│   ├── versions.ts     # Version checking and image building
+│   ├── sync.ts         # Claude config syncing
+│   ├── install.ts      # Symlink installation
+│   └── utils.ts        # Utility functions (timezone, git, etc.)
+├── package.json        # Bun project config
 ├── tsconfig.json       # TypeScript configuration
 ├── Dockerfile          # Container image definition
 ├── CLAUDE.md           # This file
 └── README.md           # User documentation
 ```
 
+**Module Responsibilities**:
+- `types.ts` - Shared TypeScript interfaces (MountSpec, VibeconConfig, Versions)
+- `config.ts` - `loadConfig()`, `getMergedConfig()`, `parseMount()`
+- `docker.ts` - Container lifecycle: `isContainerRunning()`, `containerExists()`, `startContainer()`, `ensureContainerRunning()`
+- `versions.ts` - `getAllVersions()`, `makeCompositeTag()`, `buildImage()`
+- `sync.ts` - `syncClaudeConfig()` for copying settings to container
+- `install.ts` - `installSymlink()`, `uninstallSymlink()`
+- `utils.ts` - `getHostTimezone()`, `getGitUserInfo()`, `findVibeconRoot()`, color codes
+
 **Container lifecycle**:
 1. `generateContainerName()` creates unique name from workspace path + MD5 hash
 2. `ensureContainerRunning()` handles create/restart/reuse logic
 3. Containers run detached with `sleep infinity`, commands exec into them
-
-**Key functions**:
-- `getMergedConfig()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
-- `parseMount()` - Parses mount objects into docker arguments (returns `-v` or `--mount` args)
-- `syncClaudeConfig()` - Copies statusLine settings, CLAUDE.md, and commands/ dir from host `~/.claude/` to container
-- `getAllVersions()` - Fetches latest versions of gemini-cli, codex from npm, and Go from golang.org
-- `buildImage()` - Builds Docker image with composite version tag
 
 **Docker image** (`Dockerfile`):
 - Base: `node:24` with zsh, git, fzf, gh, delta, nano, vim, curl, make, build-essential
@@ -188,16 +200,22 @@ vibecon/
 
 ```bash
 # Install dependencies
-npm install
+bun install
 
-# Build TypeScript
-npm run build
+# Run directly with Bun (development)
+bun run src/index.ts [args]
 
-# Run in development mode
-npm run dev -- [args]
+# Run with watch mode
+bun run dev
 
-# Run compiled version
-node dist/index.js [args]
+# Build compiled binary
+bun run build
+
+# Run compiled binary
+./vibecon [args]
+
+# Type checking
+bun run typecheck
 ```
 
 ### Docker Container Naming
@@ -206,7 +224,7 @@ node dist/index.js [args]
 
 ### Mount Implementation Details
 
-The `parseMount()` function handles three mount types differently:
+The `parseMount()` function in `src/config.ts` handles three mount types:
 
 **Bind mounts**: Uses `-v source:target[:options]` syntax
 - Options: `ro` for read-only, `z`/`Z` for SELinux
@@ -237,9 +255,11 @@ mount | grep workspace
 ls -la /workspace/node_modules
 ```
 
-### TypeScript Conventions
+### TypeScript/Bun Conventions
 
 - Use strict TypeScript configuration
 - Prefer async/await over callbacks
-- Use commander.js for CLI argument parsing
+- Use native argument parsing (no external CLI libraries)
 - Use child_process spawn/exec for external commands
+- Bun's built-in TypeScript support - no compilation needed for development
+- `bun build --compile` for standalone binary distribution

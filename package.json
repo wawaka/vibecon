@@ -2,16 +2,16 @@
   "name": "vibecon",
   "version": "1.0.0",
   "description": "Persistent, isolated Docker containers for running Claude Code and other AI coding assistants safely",
-  "main": "dist/index.js",
+  "type": "module",
+  "main": "src/index.ts",
   "bin": {
-    "vibecon": "dist/index.js"
+    "vibecon": "src/index.ts"
   },
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --compile --outfile vibecon",
+    "dev": "bun run --watch src/index.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "docker",
@@ -23,13 +23,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@types/bun": "^1.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
-  },
-  "dependencies": {
-    "commander": "^13.0.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }
