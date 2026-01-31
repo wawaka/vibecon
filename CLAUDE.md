@@ -4,14 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Vibecon is a Python CLI tool that creates persistent, isolated Docker containers for running Claude Code (and other AI coding assistants) safely. Each workspace directory gets its own container that persists across sessions.
+Vibecon is a Go CLI tool that creates persistent, isolated Docker containers for running Claude Code (and other AI coding assistants) safely. Each workspace directory gets its own container that persists across sessions.
 
 ## Commands
 
 ```bash
+# Build the Go binary
+go build -o vibecon .
+
 # Install/uninstall the vibecon symlink
-./vibecon.py -i          # Install to ~/.local/bin/vibecon
-./vibecon.py -u          # Uninstall
+./vibecon -i             # Install to ~/.local/bin/vibecon
+./vibecon -u             # Uninstall
 
 # Container operations
 vibecon                  # Start claude in container (default command)
@@ -144,19 +147,28 @@ vibecon       # Creates new container with updated mounts
 
 ## Architecture
 
-**Single-file CLI**: `vibecon.py` - All logic in one Python script (~840 lines)
+**Go CLI Application**: Modular package structure
+
+**Project structure**:
+- `main.go` - Entry point and CLI argument parsing
+- `internal/config/` - Config file loading and merging
+- `internal/docker/` - Docker container lifecycle and image building
+- `internal/mount/` - Mount specification parsing
+- `internal/version/` - Concurrent version fetching from npm and golang.org
+- `internal/sync/` - Claude config synchronization
+- `internal/install/` - Symlink installation with PATH detection
 
 **Container lifecycle**:
-1. `generate_container_name()` creates unique name from workspace path + MD5 hash
-2. `ensure_container_running()` handles create/restart/reuse logic
+1. `GenerateContainerName()` creates unique name from workspace path + MD5 hash
+2. `EnsureContainerRunning()` handles create/restart/reuse logic
 3. Containers run detached with `sleep infinity`, commands exec into them
 
-**Key functions**:
-- `get_merged_config()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
-- `parse_mount()` - Parses mount objects into docker arguments (returns `-v` or `--mount` args)
-- `sync_claude_config()` - Copies statusLine settings, CLAUDE.md, and commands/ dir from host `~/.claude/` to container
-- `get_all_versions()` - Fetches latest versions of gemini-cli, codex from npm, and Go from golang.org
-- `build_image()` - Builds Docker image with composite version tag
+**Key features**:
+- `GetMergedConfig()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
+- `ParseMount()` - Parses mount objects into docker arguments (returns `-v` or `--mount` args)
+- `SyncClaudeConfig()` - Copies statusLine settings, CLAUDE.md, and commands/ dir from host `~/.claude/` to container
+- `GetAllVersions()` - Fetches latest versions of gemini-cli, codex from npm, and Go from golang.org (concurrent)
+- `BuildImage()` - Builds Docker image with composite version tag
 
 **Docker image** (`Dockerfile`):
 - Base: `node:24` with zsh, git, fzf, gh, delta, nano, vim, curl, make, build-essential
@@ -173,7 +185,7 @@ vibecon       # Creates new container with updated mounts
 
 ### Mount Implementation Details
 
-The `parse_mount()` function handles three mount types differently:
+The `ParseMount()` function handles three mount types differently:
 
 **Bind mounts**: Uses `-v source:target[:options]` syntax
 - Options: `ro` for read-only, `z`/`Z` for SELinux
