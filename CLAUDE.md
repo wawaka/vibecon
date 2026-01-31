@@ -13,6 +13,10 @@ Vibecon is a Python CLI tool that creates persistent, isolated Docker containers
 ./vibecon.py -i          # Install to ~/.local/bin/vibecon
 ./vibecon.py -u          # Uninstall
 
+# Initialize project
+vibecon -r .             # Initialize .vibecon.json in current dir
+vibecon -r /path/to/dir  # Initialize in specified directory
+
 # Container operations
 vibecon                  # Start claude in container (default command)
 vibecon zsh              # Run zsh in container
@@ -26,11 +30,40 @@ vibecon -K               # Destroy container permanently
 
 ## Configuration Files
 
-Vibecon supports JSON config files for extra mounts:
-- `~/.vibecon.json` - Global config (applies to all projects)
-- `./.vibecon.json` - Project config (applies to current workspace)
+Vibecon **requires** a `.vibecon.json` file with a `root` field to define the project root. This file is searched for starting from the current directory up through parent directories.
+
+### Required: Project Root Config
+
+Every project must have a `.vibecon.json` with a `root` field:
+
+```json
+{
+  "root": "/workspace",
+  "mounts": [...]
+}
+```
+
+The `root` field specifies the container path where the project directory is mounted. Running `vibecon` without a valid root config will exit with an error.
+
+### Config File Locations
+
+- `./.vibecon.json` (or parent directories) - **Required**, must contain `root` field
+- `~/.vibecon.json` - Global config (optional, extra mounts for all projects)
 
 Configs are merged: global mounts first, then project mounts appended.
+
+### Working Directory
+
+When running from a subdirectory within a project, vibecon:
+1. Finds the project root by searching up for `.vibecon.json` with `root`
+2. Uses project root for container naming (same container for all subdirs)
+3. Sets the working directory inside the container to match your relative position
+
+Example:
+- Host cwd: `/Users/vlk/projects/myproject/src/components`
+- Project root: `/Users/vlk/projects/myproject`
+- Container mount root: `/workspace`
+- Container workdir: `/workspace/src/components`
 
 ### Mount Syntax
 
@@ -74,6 +107,7 @@ All mounts must be objects with an explicit `type` field. Three types are suppor
 #### Basic node_modules isolation
 ```json
 {
+  "root": "/workspace",
   "mounts": [
     {"type": "anonymous", "target": "/workspace/node_modules"}
   ]
@@ -83,6 +117,7 @@ All mounts must be objects with an explicit `type` field. Three types are suppor
 #### Monorepo with multiple workspaces
 ```json
 {
+  "root": "/workspace",
   "mounts": [
     {"type": "anonymous", "target": "/workspace/node_modules"},
     {"type": "anonymous", "target": "/workspace/frontend/node_modules"},
@@ -91,7 +126,7 @@ All mounts must be objects with an explicit `type` field. Three types are suppor
 }
 ```
 
-#### Shared cache volumes (global)
+#### Global config (~/.vibecon.json) - shared cache volumes
 ```json
 {
   "mounts": [
@@ -101,9 +136,12 @@ All mounts must be objects with an explicit `type` field. Three types are suppor
 }
 ```
 
+Note: Global config does not need a `root` field since it's for extra mounts only.
+
 #### Bind mounts for config files
 ```json
 {
+  "root": "/workspace",
   "mounts": [
     {"type": "bind", "source": "~/.aws", "target": "/home/node/.aws", "read_only": true},
     {"type": "bind", "source": "./config", "target": "/app/config", "read_only": true}
@@ -114,6 +152,7 @@ All mounts must be objects with an explicit `type` field. Three types are suppor
 #### Complete project setup
 ```json
 {
+  "root": "/workspace",
   "mounts": [
     {"type": "anonymous", "target": "/workspace/node_modules"},
     {"type": "volume", "source": "npm_cache", "target": "/home/node/.npm", "global": true},
@@ -147,12 +186,14 @@ vibecon       # Creates new container with updated mounts
 **Single-file CLI**: `vibecon.py` - All logic in one Python script (~840 lines)
 
 **Container lifecycle**:
-1. `generate_container_name()` creates unique name from workspace path + MD5 hash
-2. `ensure_container_running()` handles create/restart/reuse logic
-3. Containers run detached with `sleep infinity`, commands exec into them
+1. `find_project_root()` searches up directory tree for `.vibecon.json` with `root` field
+2. `generate_container_name()` creates unique name from project root path + MD5 hash
+3. `ensure_container_running()` handles create/restart/reuse logic
+4. Containers run detached with `sleep infinity`, commands exec into them with `-w` for workdir
 
 **Key functions**:
-- `get_merged_config()` - Loads and merges `~/.vibecon.json` + `./.vibecon.json`
+- `find_project_root()` - Searches for `.vibecon.json` with `root` field, returns (project_root, config, mount_root)
+- `get_merged_config()` - Merges `~/.vibecon.json` global mounts + project config mounts
 - `parse_mount()` - Parses mount objects into docker arguments (returns `-v` or `--mount` args)
 - `sync_claude_config()` - Copies statusLine settings, CLAUDE.md, and commands/ dir from host `~/.claude/` to container
 - `get_all_versions()` - Fetches latest versions of gemini-cli, codex from npm, and Go from golang.org
@@ -169,7 +210,7 @@ vibecon       # Creates new container with updated mounts
 
 ### Docker Container Naming
 - Do not shorten Docker container names - always use full path + full hash
-- Container names follow pattern: `vibecon-{full-sanitized-path}-{full-md5-hash}`
+- Container names follow pattern: `vibecon-{md5-hash}-{full-sanitized-path}`
 
 ### Mount Implementation Details
 

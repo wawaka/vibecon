@@ -31,13 +31,54 @@ def load_config(config_path):
         sys.exit(1)
 
 
-def get_merged_config(project_root):
-    """Load and merge global + project configs."""
+def find_project_root():
+    """Find project root by searching for .vibecon.json with 'root' defined.
+
+    Searches current directory and parents until finding a .vibecon.json
+    with a 'root' field defined. Returns tuple of (project_root_path, root_config, container_mount_root).
+    Exits with error if no .vibecon.json with 'root' is found.
+    """
+    current = Path(os.getcwd()).resolve()
+
+    while True:
+        config_path = current / ".vibecon.json"
+        if config_path.exists():
+            try:
+                with open(config_path) as f:
+                    config = json.load(f)
+                if "root" in config:
+                    # Found a config with root defined
+                    return str(current), config, config["root"]
+            except json.JSONDecodeError:
+                pass  # Invalid JSON, skip this file
+
+        # Move to parent directory
+        parent = current.parent
+        if parent == current:
+            # Reached filesystem root
+            break
+        current = parent
+
+    # No root config found - exit with error
+    print("Error: No .vibecon.json with 'root' field found in current directory or any parent.")
+    print("Create a .vibecon.json file with a 'root' field to define the project root.")
+    print('Example: {"root": "/workspace"}')
+    sys.exit(1)
+
+
+def get_merged_config(root_config):
+    """Load and merge global + project configs.
+
+    Args:
+        root_config: The root config from find_project_root() - required.
+
+    Global mounts from ~/.vibecon.json are added first, then project mounts.
+    """
     global_cfg = load_config("~/.vibecon.json")
-    project_cfg = load_config(os.path.join(project_root, ".vibecon.json"))
+    project_mounts = root_config.get("mounts", [])
 
     return {
-        "mounts": global_cfg.get("mounts", []) + project_cfg.get("mounts", []),
+        "mounts": global_cfg.get("mounts", []) + project_mounts,
     }
 
 
@@ -284,6 +325,48 @@ def uninstall_symlink():
     else:
         print(f"Symlink not found: {symlink_path}")
 
+
+def init_config(target_path):
+    """Initialize .vibecon.json with root field in target directory.
+
+    Creates the file if it doesn't exist, or adds root field to existing file.
+    Fails if root field already exists.
+    """
+    target_dir = Path(target_path).resolve()
+    if not target_dir.is_dir():
+        print(f"Error: '{target_path}' is not a directory")
+        sys.exit(1)
+
+    config_path = target_dir / ".vibecon.json"
+
+    if config_path.exists():
+        # Load existing config
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in {config_path}: {e}")
+            sys.exit(1)
+
+        # Check if root already exists
+        if "root" in config:
+            print(f"Error: '{config_path}' already has a 'root' field defined")
+            sys.exit(1)
+
+        # Add root field
+        config["root"] = "/workspace"
+    else:
+        # Create new config
+        config = {"root": "/workspace"}
+
+    # Write config
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+    print(f"Initialized: {config_path}")
+    print('  Added: "root": "/workspace"')
+
 def is_container_running(container_name):
     """Check if container is running"""
     result = subprocess.run(
@@ -361,7 +444,7 @@ def generate_container_name(workspace_path):
     # Remove leading slash and replace special chars with hyphens
     sanitized_path = workspace_path.lstrip('/').replace('/', '-').replace('_', '-').lower()
 
-    return f"vibecon-{sanitized_path}-{path_hash}"
+    return f"vibecon-{path_hash}-{sanitized_path}"
 
 def image_exists(image_name):
     """Check if Docker image exists"""
@@ -714,8 +797,16 @@ def sync_claude_config(container_name):
     )
 
 
-def start_container(cwd, container_name, image_name, config=None):
-    """Start the container in detached mode"""
+def start_container(project_root, container_name, image_name, container_mount_root, config=None):
+    """Start the container in detached mode
+
+    Args:
+        project_root: Host path to mount as project root
+        container_name: Name for the container
+        image_name: Docker image to use
+        container_mount_root: Path inside container where project_root is mounted
+        config: Optional config with mounts
+    """
     if config is None:
         config = {"volumes": {}, "mounts": []}
 
@@ -731,7 +822,7 @@ def start_container(cwd, container_name, image_name, config=None):
     host_timezone = get_host_timezone()
     print(f"Configuring timezone: {host_timezone}")
 
-    print(f"Starting container '{container_name}' with {cwd} mounted at /workspace...")
+    print(f"Starting container '{container_name}' with {project_root} mounted at {container_mount_root}...")
 
     # Build docker run command
     docker_cmd = [
@@ -752,7 +843,7 @@ def start_container(cwd, container_name, image_name, config=None):
         ])
 
     # Add main workspace volume mount
-    docker_cmd.extend(["-v", f"{cwd}:/workspace"])
+    docker_cmd.extend(["-v", f"{project_root}:{container_mount_root}"])
 
     # Add extra mounts from config
     for mount_spec in config.get("mounts", []):
@@ -773,8 +864,17 @@ def start_container(cwd, container_name, image_name, config=None):
         print(f"Failed to start container: {run_result.stderr.decode()}")
         sys.exit(1)
 
-def ensure_container_running(cwd, vibecon_root, container_name, image_name, config=None):
-    """Ensure container is running"""
+def ensure_container_running(project_root, vibecon_root, container_name, image_name, container_mount_root, config=None):
+    """Ensure container is running
+
+    Args:
+        project_root: Host path to mount as project root
+        vibecon_root: Path to vibecon installation (for building image)
+        container_name: Name for the container
+        image_name: Docker image to use
+        container_mount_root: Path inside container where project_root is mounted
+        config: Optional config with mounts
+    """
     if is_container_running(container_name):
         return  # Already running, nothing to do
 
@@ -795,7 +895,7 @@ def ensure_container_running(cwd, vibecon_root, container_name, image_name, conf
     if not image_exists(image_name):
         print(f"Image '{image_name}' not found, building...")
         build_image(vibecon_root, image_name)
-    start_container(cwd, container_name, image_name, config)
+    start_container(project_root, container_name, image_name, container_mount_root, config)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -808,6 +908,7 @@ Examples:
   %(prog)s claude             # Run Claude Code in container
   %(prog)s gemini             # Run Gemini CLI in container
   %(prog)s codex              # Run OpenAI Codex in container
+  %(prog)s -r .               # Initialize .vibecon.json in current dir
   %(prog)s -b                 # Check versions and rebuild if updated
   %(prog)s -B                 # Force rebuild regardless of versions
   %(prog)s -k                 # Stop container (can be restarted)
@@ -832,6 +933,12 @@ Examples:
         "-u", "--uninstall",
         action="store_true",
         help="uninstall symlink from ~/.local/bin/vibecon"
+    )
+
+    parser.add_argument(
+        "-r", "--init",
+        metavar="PATH",
+        help="initialize .vibecon.json with root field in specified directory"
     )
 
     parser.add_argument(
@@ -881,20 +988,18 @@ Examples:
         uninstall_symlink()
         sys.exit(0)
 
-    cwd = os.getcwd()
-    vibecon_root = find_vibecon_root()
+    # Handle init flag - initialize .vibecon.json and exit
+    if args.init:
+        init_config(args.init)
+        sys.exit(0)
 
-    if not vibecon_root:
-        print("Error: Could not find Dockerfile in vibecon.py directory")
-        sys.exit(1)
-
-    container_name = generate_container_name(cwd)
-
-    # Load config files
-    config = get_merged_config(cwd)
-
-    # Handle build flag - check versions and build only if needed
+    # Handle build flag early - doesn't require project root
     if args.build or args.force_build:
+        vibecon_root = find_vibecon_root()
+        if not vibecon_root:
+            print("Error: Could not find Dockerfile in vibecon.py directory")
+            sys.exit(1)
+
         versions = get_all_versions()
         composite_tag = make_composite_tag(versions)
         versioned_image = f"vibecon:{composite_tag}"
@@ -914,6 +1019,36 @@ Examples:
             print(f"  - {versioned_image}")
         sys.exit(0)
 
+    # Find project root - exits with error if no .vibecon.json with 'root' found
+    project_root, root_config, container_mount_root = find_project_root()
+    cwd = os.getcwd()
+
+    vibecon_root = find_vibecon_root()
+    if not vibecon_root:
+        print("Error: Could not find Dockerfile in vibecon.py directory")
+        sys.exit(1)
+
+    # Container name is based on project root, not cwd
+    container_name = generate_container_name(project_root)
+
+    # Load config files
+    config = get_merged_config(root_config)
+
+    # Calculate working directory inside container
+    # If cwd is nested under project_root, calculate relative path
+    try:
+        rel_path = os.path.relpath(cwd, project_root)
+        if rel_path == ".":
+            container_workdir = container_mount_root
+        elif rel_path.startswith(".."):
+            # cwd is not under project_root, use mount root
+            container_workdir = container_mount_root
+        else:
+            container_workdir = os.path.join(container_mount_root, rel_path)
+    except ValueError:
+        # Different drives on Windows
+        container_workdir = container_mount_root
+
     # Handle stop flag - stop the container and exit
     if args.stop:
         stop_container(container_name)
@@ -928,7 +1063,7 @@ Examples:
     command = args.command if args.command else DEFAULT_COMMAND
 
     # Ensure container is running
-    ensure_container_running(cwd, vibecon_root, container_name, IMAGE_NAME, config)
+    ensure_container_running(project_root, vibecon_root, container_name, IMAGE_NAME, container_mount_root, config)
 
     # Sync claude config before exec
     sync_claude_config(container_name)
@@ -941,6 +1076,7 @@ Examples:
         [
             "docker", "exec",
             "-it",
+            "-w", container_workdir,
             "-e", f"TERM={host_term}",
             "-e", "COLORTERM=truecolor",
             "-e", f"TZ={host_timezone}",
