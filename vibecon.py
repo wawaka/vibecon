@@ -594,6 +594,49 @@ def get_host_timezone():
     # If all else fails, return UTC as default
     return "UTC"
 
+def detect_worktree(workspace_path):
+    """Detect if workspace is a git worktree, return main .git path if so.
+
+    In a worktree, .git is a file containing 'gitdir: /path/to/main/.git/worktrees/name'.
+    We need to mount the main .git directory so git operations work inside the container.
+
+    Returns:
+        str: Path to main .git directory if this is a worktree, None otherwise.
+    """
+    git_path = os.path.join(workspace_path, ".git")
+
+    # If .git is a directory, this is a normal repo (not a worktree)
+    if os.path.isdir(git_path):
+        return None
+
+    # If .git is a file, parse it to find the main repo's .git directory
+    if os.path.isfile(git_path):
+        try:
+            with open(git_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            if content.startswith("gitdir:"):
+                # Parse: gitdir: /path/to/main/.git/worktrees/name
+                gitdir = content.split(":", 1)[1].strip()
+                # Resolve to absolute path (handles relative paths)
+                gitdir = os.path.abspath(os.path.join(workspace_path, gitdir))
+                # Go up from .git/worktrees/name to .git
+                # gitdir points to: main-repo/.git/worktrees/worktree-name
+                # We want: main-repo/.git
+                if "/worktrees/" in gitdir:
+                    main_git = gitdir.rsplit("/worktrees/", 1)[0]
+                    # Validate that the extracted main git path exists and is a directory
+                    if os.path.isdir(main_git):
+                        return main_git
+                    else:
+                        print(f"Warning: Git worktree detected but main .git directory not found: {main_git}")
+                else:
+                    print(f"Warning: Git worktree file format unexpected, expected '/worktrees/' in path: {gitdir}")
+        except (IOError, OSError) as e:
+            print(f"Warning: Failed to read git worktree file {git_path}: {e}")
+
+    return None
+
+
 def get_git_user_info():
     """Get git user.name and user.email from host"""
     user_name = ""
@@ -844,6 +887,14 @@ def start_container(project_root, container_name, image_name, container_mount_ro
 
     # Add main workspace volume mount
     docker_cmd.extend(["-v", f"{project_root}:{container_mount_root}"])
+
+    # Auto-detect git worktree and mount main .git directory
+    # This allows git operations to work inside the container
+    main_git = detect_worktree(cwd)
+    if main_git:
+        print(f"Detected git worktree, mounting main .git: {main_git}")
+        # Mount at same absolute path so .git file references resolve correctly
+        docker_cmd.extend(["-v", f"{main_git}:{main_git}"])
 
     # Add extra mounts from config
     for mount_spec in config.get("mounts", []):

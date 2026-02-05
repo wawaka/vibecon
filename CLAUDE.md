@@ -198,6 +198,7 @@ vibecon       # Creates new container with updated mounts
 - `sync_claude_config()` - Copies statusLine settings, CLAUDE.md, and commands/ dir from host `~/.claude/` to container
 - `get_all_versions()` - Fetches latest versions of gemini-cli, codex from npm, and Go from golang.org
 - `build_image()` - Builds Docker image with composite version tag
+- `detect_worktree()` - Detects git worktrees and returns path to main `.git` directory
 
 **Docker image** (`Dockerfile`):
 - Base: `node:24` with zsh, git, fzf, gh, delta, nano, vim, curl, make, build-essential
@@ -205,6 +206,29 @@ vibecon       # Creates new container with updated mounts
 - Installs Claude Code via official installer, plus `@google/gemini-cli` and `@openai/codex` from npm
 - Runs as non-root `node` user (uid 1000)
 - Entrypoint configures git from env vars on first run
+
+## Git Worktree Support
+
+Vibecon automatically detects and supports git worktrees. When you run vibecon from a worktree directory:
+
+1. **Auto-detection**: Vibecon detects that `.git` is a file (not a directory) and parses it to find the main repository's `.git` directory
+2. **Automatic mounting**: The main `.git` directory is mounted at its original absolute path inside the container
+3. **Transparent operation**: Git commands work normally inside the container because path references in the worktree's `.git` file resolve correctly
+
+### How it works
+
+In a git worktree, the `.git` file contains a reference like:
+```
+gitdir: /home/user/main-repo/.git/worktrees/feature-branch
+```
+
+Vibecon parses this to find `/home/user/main-repo/.git` and mounts it at the same path inside the container. This allows git operations (commit, push, pull, etc.) to work seamlessly.
+
+### Limitations
+
+- Each worktree gets its own container (they don't share)
+- The main repository's `.git` directory must be accessible from the host
+- If running multiple containers accessing the same `.git` directory, be aware of potential lock contention
 
 ## Development Guidelines
 
